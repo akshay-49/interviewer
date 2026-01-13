@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+langgraph
+langchain
+langchain-core
+langchain-community
+langchain-ollama
+faster-whisper
+python-multipart
+soundfile
+sounddevice
+pydantic

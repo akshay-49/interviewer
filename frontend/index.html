@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>AI Interview</title>
+</head>
+<body>
+
+  <button id="start">Start Interview</button>
+  <br><br>
+
+  <input id="answer" placeholder="Type answer here" />
+  <button id="send">Send Answer</button>
+
+  <pre id="text"></pre>
+
+  <script>
+    const API = "http://127.0.0.1:8000";
+
+    let sessionId = null;
+
+    function playBase64Audio(base64) {
+      const binary = atob(base64);
+      const bytes = new Uint8Array([...binary].map(c => c.charCodeAt(0)));
+      const blob = new Blob([bytes], { type: "audio/wav" });
+      const audio = new Audio(URL.createObjectURL(blob));
+      audio.play();
+    }
+
+    document.getElementById("start").onclick = async () => {
+      const res = await fetch(`${API}/interview/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          role: "Model Based Systems Engineer",
+          experience: "Intern"
+        })
+      });
+
+      const data = await res.json();
+      sessionId = data.session_id;
+
+      document.getElementById("text").textContent = data.question;
+      playBase64Audio(data.audio);
+    };
+
+    document.getElementById("send").onclick = async () => {
+      const answer = document.getElementById("answer").value;
+      document.getElementById("answer").value = "";
+
+      const res = await fetch(`${API}/interview/answer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: sessionId,
+          answer: answer
+        })
+      });
+
+      const data = await res.json();
+
+      if (data.final) {
+        document.getElementById("text").textContent = data.spoken_closing;
+  playBase64Audio(data.audio);
+}
+ else {
+        document.getElementById("text").textContent = data.question;
+        playBase64Audio(data.audio);
+      }
+    };
+  </script>
+
+</body>
+</html>
