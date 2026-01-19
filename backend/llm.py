@@ -1,5 +1,5 @@
 from langchain_ollama import ChatOllama
-from models import Question, Evaluation, Feedback, SpokenClosing, SpokenTransition
+from backend.models import Question, Evaluation, Feedback, SpokenClosing, SpokenTransition
 
 llm = ChatOllama(
     model="gpt-oss:120b-cloud",

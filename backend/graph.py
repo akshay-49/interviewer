@@ -1,7 +1,7 @@
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
-from models import InterviewState
-from nodes import (
+from backend.models import InterviewState
+from backend.nodes import (
     ask_question_node,
     await_answer_node,
     evaluate_node,
@@ -29,7 +29,6 @@ def build_graph():
     builder.add_edge("await_answer", "evaluate")
     builder.add_edge("evaluate", "feedback")
     builder.add_edge("feedback", "decide")
-    builder.add_edge("decide", "transition")
     builder.add_edge("transition", "ask")
 
     builder.add_conditional_edges(

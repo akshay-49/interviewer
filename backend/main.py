@@ -5,9 +5,9 @@ from uuid import uuid4
 from langgraph.types import Command
 import base64
 
-from models import InterviewState
-from graph import build_graph
-from tts.tts_engine import synthesize_speech
+from backend.models import InterviewState
+from backend.graph import build_graph
+from backend.tts.tts_engine import synthesize_speech
 
 # --------------------------------------------------
 # App
@@ -112,10 +112,12 @@ def start_interview(req: StartInterviewRequest):
 
 @app.post("/interview/answer")
 def answer_interview(req: AnswerRequest):
+    print(f"[DEBUG] Received answer for session {req.session_id}: {req.answer[:50]}...")
     result = graph.invoke(
         Command(resume=req.answer),
         config={"configurable": {"thread_id": req.session_id}},
     )
+    print(f"[DEBUG] Graph result keys: {result.keys()}")
 
     # -----------------------------
     # Interview finished

@@ -1,7 +1,7 @@
 from typing import Dict
 from langgraph.types import interrupt
-from models import InterviewState
-from agents import (
+from backend.models import InterviewState
+from backend.agents import (
     ask_question_agent,
     evaluate_answer_agent,
     feedback_agent,

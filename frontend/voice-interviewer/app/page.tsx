@@ -24,7 +24,6 @@ export default function Home() {
   const [transcript, setTranscript] = useState<string>("");
   const [isAudioPlaying, setIsAudioPlaying] = useState<boolean>(false);
   const [isReviewMode, setIsReviewMode] = useState<boolean>(false);
-  const [autoSendCountdown, setAutoSendCountdown] = useState<number>(0);
   const [sttSupported, setSttSupported] = useState<boolean>(true);
   const [recordingTime, setRecordingTime] = useState<number>(0); // Recording duration in seconds
   const [showEndConfirmation, setShowEndConfirmation] = useState<boolean>(false);
@@ -122,32 +121,14 @@ export default function Home() {
         if (isReviewMode && answer.trim()) {
           // Submit from review mode
           setIsReviewMode(false);
-          setAutoSendCountdown(0);
           sendAnswer();
-        }
-      }
-      // Space to toggle recording or re-record
-      if (e.code === 'Space' && sessionId && !isAudioPlaying) {
-        e.preventDefault();
-        if (isReviewMode) {
-          // Re-record
-          setIsReviewMode(false);
-          setAnswer("");
-          setRecordingTime(0);
-          startRecording();
-        } else if (!isRecording) {
-          // Start recording
-          startRecording();
-        } else {
-          // Stop recording
-          stopRecording();
         }
       }
     };
     
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [isRecording, isReviewMode, isAudioPlaying, sessionId, answer, loading]);
+  }, [isReviewMode, sessionId, answer, loading]);
 
   useEffect(() => {
     if (!isReviewMode) return;
@@ -155,21 +136,8 @@ export default function Home() {
 
   // Auto-send countdown effect - auto-submit after countdown reaches 0
   useEffect(() => {
-    if (autoSendCountdown <= 0 || !isReviewMode || !sessionId) return;
-    
-    const timer = setInterval(() => {
-      setAutoSendCountdown((prev) => {
-        const newCountdown = prev - 1;
-        if (newCountdown === 0) {
-          // Auto-send when countdown reaches 0
-          sendAnswer();
-        }
-        return newCountdown;
-      });
-    }, 1000);
-    
-    return () => clearInterval(timer);
-  }, [autoSendCountdown, isReviewMode, sessionId]);
+    if (!isReviewMode) return;
+  }, [isReviewMode]);
 
   function playBase64Audio(base64: string) {
     const binary = atob(base64);
@@ -297,10 +265,9 @@ export default function Home() {
         }
         
         // Check refs (not state) since setState is asynchronous
-        // If paused, just stay paused. If stopped and not manual recording, enter review mode with countdown
+        // If paused, just stay paused. If stopped and not manual recording, enter review mode
         if (!isPausedRef.current && !manualRecordingRef.current) {
           setIsReviewMode(true);
-          setAutoSendCountdown(answerRef.current.trim() ? 5 : 10);
         }
       };
 
@@ -438,6 +405,7 @@ export default function Home() {
   async function sendAnswer() {
     if (!sessionId) return;
 
+    console.log('[DEBUG] sendAnswer called');
     setLoading(true);
     setError(null);
     setFeedbackMessage(null);
@@ -462,7 +430,6 @@ export default function Home() {
       const data = await res.json();
       setAnswer("");
       setIsReviewMode(false);
-      setAutoSendCountdown(0);
 
       if (data.final) {
         setFinished(true);
@@ -508,7 +475,6 @@ export default function Home() {
     setIsAudioPlaying(false);
     setTranscript("");
     setIsReviewMode(false);
-    setAutoSendCountdown(0);
     setRecordingTime(0);
     setSessionTimeout(0);
     setShowEndConfirmation(false);
@@ -622,7 +588,7 @@ export default function Home() {
                   value={answer}
                   onChange={(e) => setAnswer(e.target.value)}
                   placeholder="Your answer will appear here..."
-                  disabled={loading || isAudioPlaying || isRecording}
+                  disabled={loading || isAudioPlaying}
                   style={{ marginBottom: "8px" }}
                 />
                 
@@ -653,7 +619,7 @@ export default function Home() {
                 )}
                 {isReviewMode && (
                   <div className="status-indicator status-review">
-                    <span>Submitting in {autoSendCountdown}s</span>
+                    <span>Review Mode - Ready to Submit</span>
                   </div>
                 )}
                 {!isAudioPlaying && !isRecording && !isReviewMode && (
