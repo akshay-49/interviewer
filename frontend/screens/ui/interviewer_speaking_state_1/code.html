@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>InterviewPrep AI - Interviewer Agent</title>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#2c3e50","primary-accent": "#34495e",
+                        "background-light": "#f1f5f9","background-dark": "#0f172a",},
+                    fontFamily: {
+                        "display": ["Manrope", "sans-serif"]
+                    },
+                    borderRadius: {"DEFAULT": "0.5rem", "lg": "1rem", "xl": "1.5rem", "full": "9999px"},
+                    animation: {
+                        'wave': 'wave 1.2s ease-in-out infinite',
+                        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'breath': 'breath 4s ease-in-out infinite',
+                    },
+                    keyframes: {
+                        wave: {
+                            '0%, 100%': { height: '10%' },
+                            '50%': { height: '100%' },
+                        },
+                        breath: {
+                            '0%, 100%': { transform: 'scale(1)' },
+                            '50%': { transform: 'scale(1.02)' },
+                        }
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+        }
+        .dark .glass-panel {
+            background: rgba(30, 41, 59, 0.8);border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark text-[#1e293b] dark:text-[#f1f5f9] font-display min-h-screen flex flex-col overflow-x-hidden transition-colors duration-300">
+<header class="w-full border-b border-slate-200 dark:border-slate-800 bg-white/50 dark:bg-[#0f172a]/50 backdrop-blur-sm sticky top-0 z-10">
+<div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="size-9 bg-primary text-white rounded-lg flex items-center justify-center shadow-sm">
+<span class="material-symbols-outlined text-xl">graphic_eq</span>
+</div>
+<h2 class="text-lg font-bold tracking-tight text-primary dark:text-slate-200">InterviewPrep AI</h2>
+</div>
+<div class="hidden md:flex items-center gap-4">
+<span class="text-sm font-semibold text-slate-500 dark:text-slate-400">Junior Frontend Developer Interview</span>
+<div class="h-4 w-px bg-slate-300 dark:bg-slate-700"></div>
+<button class="text-sm font-bold text-slate-600 dark:text-slate-300 hover:text-red-500 transition-colors">
+                    End Session
+                </button>
+</div>
+<div class="md:hidden">
+<span class="material-symbols-outlined text-slate-700 dark:text-slate-300">menu</span>
+</div>
+</div>
+</header>
+<main class="flex-grow flex flex-col items-center justify-center p-6 sm:p-10 relative">
+<div class="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-900/5 rounded-full blur-3xl -z-10 animate-pulse-slow"></div>
+<div class="absolute bottom-1/4 right-1/4 w-80 h-80 bg-slate-400/10 dark:bg-slate-700/10 rounded-full blur-3xl -z-10 animate-pulse-slow" style="animation-delay: 1s;"></div>
+<div class="glass-panel w-full max-w-5xl rounded-2xl shadow-2xl shadow-slate-200/50 dark:shadow-black/40 overflow-hidden flex flex-col md:flex-row min-h-[550px] border border-slate-200 dark:border-slate-700">
+<div class="flex-1 p-10 md:p-14 flex flex-col justify-between border-b md:border-b-0 md:border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-[#1e293b]">
+<div class="flex flex-col gap-4 mb-8">
+<div class="flex justify-between items-center">
+<div class="flex items-center gap-2">
+<span class="bg-primary/10 text-primary px-2 py-0.5 rounded text-xs font-bold uppercase tracking-wider">Question 2 / 8</span>
+<span class="size-1.5 rounded-full bg-slate-300"></span>
+<span class="text-slate-400 dark:text-slate-500 text-xs font-semibold uppercase tracking-wider">Technical Assessment</span>
+</div>
+</div>
+<div class="h-1 w-full bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden mt-1">
+<div class="h-full bg-primary rounded-full transition-all duration-500" style="width: 25%;"></div>
+</div>
+</div>
+<div class="flex-grow flex flex-col justify-center">
+<div class="mb-4 opacity-0 animate-[fadeIn_0.5s_ease-out_forwards]">
+<span class="text-primary font-bold text-sm uppercase tracking-widest border-b-2 border-primary/20 pb-1">Current Topic: JavaScript Fundamentals</span>
+</div>
+<h1 class="text-2xl md:text-3xl lg:text-4xl font-bold leading-tight tracking-tight text-slate-800 dark:text-slate-100">
+                        Could you explain the distinction between <code class="bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-2 py-0.5 rounded text-primary-accent dark:text-blue-300 text-[0.9em] font-mono">null</code> and <code class="bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 px-2 py-0.5 rounded text-primary-accent dark:text-blue-300 text-[0.9em] font-mono">undefined</code>?
+                    </h1>
+<p class="mt-6 text-slate-500 dark:text-slate-400 text-lg leading-relaxed font-medium">
+                        Please provide a practical example of when you might encounter each in a production environment.
+                    </p>
+</div>
+<div class="mt-10 flex gap-6 pt-6 border-t border-slate-50 dark:border-slate-800/50">
+<button class="text-sm font-semibold text-slate-400 dark:text-slate-500 hover:text-primary dark:hover:text-blue-300 transition-colors flex items-center gap-2 group">
+<div class="p-1.5 rounded-full bg-slate-50 dark:bg-slate-800 group-hover:bg-primary/5 transition-colors">
+<span class="material-symbols-outlined text-[18px]">lightbulb</span>
+</div>
+                        Request Hint
+                    </button>
+<button class="text-sm font-semibold text-slate-400 dark:text-slate-500 hover:text-primary dark:hover:text-blue-300 transition-colors flex items-center gap-2 group">
+<div class="p-1.5 rounded-full bg-slate-50 dark:bg-slate-800 group-hover:bg-primary/5 transition-colors">
+<span class="material-symbols-outlined text-[18px]">skip_next</span>
+</div>
+                        Skip Question
+                    </button>
+</div>
+</div>
+<div class="w-full md:w-[360px] bg-slate-100 dark:bg-[#0f172a] p-8 flex flex-col items-center justify-center text-center relative border-l border-slate-200 dark:border-slate-800 shadow-inner">
+<div class="absolute top-6 w-full text-center">
+<span class="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">Interviewer Agent</span>
+</div>
+<div class="flex-1 flex flex-col items-center justify-center w-full mt-4">
+<div class="relative mb-6">
+<div class="absolute inset-0 bg-primary/10 dark:bg-blue-500/10 rounded-full animate-[ping_2s_cubic-bezier(0,0,0.2,1)_infinite]"></div>
+<div class="absolute -inset-4 bg-primary/5 dark:bg-blue-500/5 rounded-full animate-[pulse_3s_ease-in-out_infinite]"></div>
+<div class="relative size-32 rounded-full bg-gradient-to-br from-slate-200 to-slate-300 dark:from-slate-700 dark:to-slate-800 flex items-end justify-center overflow-hidden border-4 border-white dark:border-slate-600 shadow-xl">
+<span class="material-symbols-outlined text-[10rem] leading-none text-slate-400 dark:text-slate-500 translate-y-3 drop-shadow-sm">person</span>
+</div>
+<div class="absolute bottom-1 right-0 size-9 bg-primary dark:bg-blue-600 rounded-full border-[3px] border-slate-100 dark:border-[#0f172a] flex items-center justify-center z-10 shadow-sm">
+<span class="material-symbols-outlined text-white text-[16px] animate-pulse">graphic_eq</span>
+</div>
+</div>
+<div class="flex flex-col items-center gap-2">
+<p class="text-primary dark:text-blue-100 font-bold text-md flex items-center gap-2">
+<span class="size-2 bg-primary dark:bg-blue-400 rounded-full animate-pulse"></span>
+                        Interviewer Agent is posing a question...
+                    </p>
+<div class="h-px w-16 bg-slate-300 dark:bg-slate-700 my-2"></div>
+<p class="text-slate-500 dark:text-slate-500 text-xs font-medium">Please listen carefully before responding.</p>
+</div>
+</div>
+<div class="mt-auto pt-6 w-full flex flex-col items-center gap-4">
+<div class="relative group cursor-not-allowed opacity-60 grayscale transition-all duration-300">
+<button class="relative size-14 flex items-center justify-center rounded-full bg-slate-200 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 shadow-inner" disabled="">
+<span class="material-symbols-outlined text-slate-400 dark:text-slate-500 text-2xl">mic_off</span>
+</button>
+</div>
+<span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Listening Mode</span>
+</div>
+</div>
+</div>
+<div class="mt-8 w-full max-w-2xl text-center opacity-70 hover:opacity-100 transition-opacity cursor-pointer group">
+<div class="flex items-center justify-center gap-2 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
+<span class="material-symbols-outlined text-[18px]">keyboard_arrow_up</span>
+<span class="group-hover:text-primary dark:group-hover:text-white transition-colors">Show Interview Transcript</span>
+</div>
+</div>
+</main>
+
+</body></html>

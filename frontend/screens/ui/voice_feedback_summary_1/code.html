@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Voice Feedback Summary</title>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#365c63",
+                        "primary-hover": "#4C727A",
+                        "coach-primary": "#FB923C", // Warm Orange for Coach
+                        "coach-dark": "#C2410C", 
+                        "coach-light": "#FFF7ED", // Very light orange background
+                        "background-light": "#FAFAF9", // Warm gray/stone
+                        "background-dark": "#22252a",
+                        "card-light": "#FFFFFF",
+                        "card-dark": "#2C3035",
+                        "text-main": "#121617",
+                        "text-muted": "#657c81",
+                        "accent-success": "#5F9479",
+                        "accent-warning": "#E68D7F",
+                        "accent-clarity": "#6366f1",
+                        "accent-vocab": "#a855f7",
+                    },
+                    fontFamily: {
+                        "display": ["Manrope", "sans-serif"]
+                    },
+                    borderRadius: {"DEFAULT": "0.5rem", "lg": "1rem", "xl": "1.5rem", "2xl": "2rem", "full": "9999px"},
+                    boxShadow: {
+                        'soft': '0 10px 40px -10px rgba(0,0,0,0.05)',
+                        'glow': '0 0 20px rgba(54, 92, 99, 0.3)',
+                        'coach': '0 10px 30px -5px rgba(251, 146, 60, 0.25)',
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+        .speech-bubble-tail {
+            clip-path: polygon(0 0, 0% 100%, 100% 0);
+        }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark font-display text-text-main dark:text-gray-100 min-h-screen flex flex-col antialiased transition-colors duration-300">
+<header class="sticky top-0 z-50 w-full border-b border-[#ebefef] dark:border-gray-800 bg-white/80 dark:bg-[#22252a]/80 backdrop-blur-md">
+<div class="px-6 md:px-10 py-4 flex items-center justify-between max-w-[1400px] mx-auto">
+<div class="flex items-center gap-3 text-primary dark:text-white">
+<div class="size-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary dark:text-teal-300">
+<span class="material-symbols-outlined text-2xl">graphic_eq</span>
+</div>
+<h2 class="text-xl font-bold tracking-tight text-text-main dark:text-white">Interview Coach AI</h2>
+</div>
+<nav class="hidden md:flex items-center gap-8">
+<a class="text-text-muted hover:text-primary dark:text-gray-400 dark:hover:text-white text-sm font-semibold transition-colors" href="#">Dashboard</a>
+<a class="text-primary dark:text-teal-300 text-sm font-bold" href="#">Practice</a>
+<a class="text-text-muted hover:text-primary dark:text-gray-400 dark:hover:text-white text-sm font-semibold transition-colors" href="#">History</a>
+<div class="h-4 w-px bg-gray-200 dark:bg-gray-700"></div>
+<div class="flex items-center gap-3 cursor-pointer group">
+<div class="bg-center bg-no-repeat bg-cover rounded-full size-9 ring-2 ring-white dark:ring-gray-700 shadow-sm group-hover:ring-primary/20 transition-all" data-alt="User profile picture of a young professional" style='background-image: url("https://lh3.googleusercontent.com/aida-public/AB6AXuBKvtxRv9kQi_IoGpNCxMKZTHxzxDuTYFUPdgejGOO8edYkVpREWvjJSYq4EI35BU_i2aMeaIBKkogmcvLMNFh2b-T_0N0kC_fdXwGSEr_NqWMcJRQO_-vKosRRWXdAd_tGD3s4snAh6uiByvWzL6XAfnZBk_f5fqIGEH0pKX372DrY-LJRxFlnPkINkUwjK-DgagY7HQugThHCSvq-UDpSKGBKSelSPkDpWuVbRrJXtr75bmgEa4oFA_dbmAOXa3B3_a1NTWIhcZ4p");'></div>
+<span class="text-sm font-medium hidden lg:block text-text-main dark:text-gray-200">Alex M.</span>
+</div>
+</nav>
+<button class="md:hidden text-text-main dark:text-white">
+<span class="material-symbols-outlined">menu</span>
+</button>
+</div>
+</header>
+<main class="flex-grow flex flex-col items-center justify-start p-6 md:p-12 max-w-7xl mx-auto w-full">
+<div class="flex flex-col md:flex-row items-start gap-6 md:gap-10 w-full max-w-5xl mb-12 mt-4">
+<div class="flex flex-col items-center flex-shrink-0 md:w-48">
+<div class="relative group cursor-pointer mb-3">
+<div class="absolute inset-0 bg-coach-primary/30 rounded-full blur-2xl transform scale-125 opacity-60 group-hover:opacity-80 transition-opacity duration-700"></div>
+<div class="relative w-32 h-32 md:w-40 md:h-40 rounded-full overflow-hidden shadow-coach border-[5px] border-white dark:border-gray-800 ring-4 ring-coach-primary/30 transition-transform duration-500 hover:scale-105">
+<div class="w-full h-full bg-center bg-cover" data-alt="Coach Agent Avatar" style='background-image: url("https://lh3.googleusercontent.com/aida-public/AB6AXuCQaeqVMxOig6M54yFiZgpji4T9ja-w3ssHS8RqoQ_dNGGE8_MRUlqOpmyCRL4j7hdXabm01gHsL0nl2bV3PyWmShQTdkRETKaxhWw-itFn6unw69Ncyapfo32dRZQ-Z474a8JZwHRMX6kPqby6LFr107jqPJwLZ10TUPrj4rk-3uQy9zwOYPkMURYd1BWzDGU_2n_z0Tr8UPGN7PIomd84eoBBI_O1LwvJDAkSeRp-giT2LZzeASTL9ZpAV5QvwfL3O8yM4HH24q4K");'></div>
+<div class="absolute inset-0 bg-black/10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+<span class="material-symbols-outlined text-white text-4xl drop-shadow-lg">pause</span>
+</div>
+</div>
+<div class="absolute -bottom-3 left-1/2 -translate-x-1/2 flex flex-col items-center">
+<span class="bg-coach-primary text-white text-xs font-bold px-3 py-1 rounded-full shadow-md whitespace-nowrap border-2 border-white dark:border-gray-800">Coach Agent</span>
+</div>
+</div>
+<button class="mt-4 text-xs font-bold text-coach-dark dark:text-coach-primary flex items-center gap-1 hover:underline opacity-80 hover:opacity-100">
+<span class="material-symbols-outlined text-sm">volume_up</span>
+                    Voice Settings
+                </button>
+</div>
+<div class="flex-grow relative mt-4 md:mt-2">
+<div class="hidden md:block absolute top-12 -left-3 w-6 h-6 bg-white dark:bg-card-dark border-l border-b border-gray-100 dark:border-gray-700 transform rotate-45 z-10"></div>
+<div class="bg-white dark:bg-card-dark rounded-2xl rounded-tl-none md:rounded-tl-none md:rounded-bl-2xl p-8 shadow-soft border border-gray-100 dark:border-gray-700 relative z-0">
+<div class="flex items-center gap-2 mb-4">
+<span class="bg-coach-light dark:bg-coach-primary/10 text-coach-dark dark:text-coach-primary px-3 py-1 rounded-lg text-xs font-extrabold uppercase tracking-widest border border-coach-primary/10">Mentorship Session</span>
+</div>
+<h1 class="text-2xl md:text-3xl font-bold text-text-main dark:text-white leading-tight mb-4">
+                        "Hey Alex, great effort! I've spotted a few ways we can polish this answer together."
+                    </h1>
+<p class="text-text-muted dark:text-gray-400 text-lg leading-relaxed mb-6">
+                        Coach Agent is explaining improvements... I noticed you structured your response well with the STAR method, but your pacing was slightly rushed in the technical section. Let's look at the details below to make your next attempt even stronger.
+                    </p>
+<div class="bg-background-light dark:bg-background-dark/50 rounded-xl p-3 border border-gray-200 dark:border-gray-700 flex items-center gap-4">
+<button class="size-10 flex-shrink-0 rounded-full bg-coach-primary text-white flex items-center justify-center hover:bg-coach-dark transition-colors shadow-sm">
+<span class="material-symbols-outlined">play_arrow</span>
+</button>
+<div class="flex-grow flex flex-col justify-center">
+<div class="flex justify-between text-xs font-semibold text-text-muted mb-1.5">
+<span>Your Answer Recording</span>
+<span>00:45</span>
+</div>
+<div class="h-1.5 w-full bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+<div class="h-full bg-coach-primary w-[35%] rounded-full"></div>
+</div>
+</div>
+<div class="flex gap-2">
+<button class="p-2 text-text-muted hover:text-primary transition-colors" title="View Transcript">
+<span class="material-symbols-outlined text-lg">description</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-5xl mb-12">
+<div class="group relative bg-card-light dark:bg-card-dark rounded-xl p-8 shadow-soft hover:shadow-lg transition-all duration-300 border-t-4 border-accent-success">
+<div class="absolute top-6 right-6 text-accent-success opacity-20 group-hover:opacity-100 transition-opacity">
+<span class="material-symbols-outlined text-4xl">thumb_up</span>
+</div>
+<div class="flex items-center gap-3 mb-6">
+<div class="p-2 rounded-lg bg-accent-success/10 text-accent-success">
+<span class="material-symbols-outlined">check_circle</span>
+</div>
+<h3 class="text-xl font-bold text-text-main dark:text-white">What Went Well</h3>
+</div>
+<ul class="space-y-4">
+<li class="flex gap-3 text-text-main dark:text-gray-200 leading-relaxed">
+<span class="material-symbols-outlined text-accent-success mt-0.5 text-xl">arrow_right_alt</span>
+<span>You clearly defined the <strong class="text-primary dark:text-teal-300">STAR method</strong> in your example.</span>
+</li>
+<li class="flex gap-3 text-text-main dark:text-gray-200 leading-relaxed">
+<span class="material-symbols-outlined text-accent-success mt-0.5 text-xl">arrow_right_alt</span>
+<span>Strong opening statement addressing the core concern.</span>
+</li>
+</ul>
+</div>
+<div class="group relative bg-card-light dark:bg-card-dark rounded-xl p-8 shadow-soft hover:shadow-lg transition-all duration-300 border-t-4 border-accent-warning">
+<div class="absolute top-6 right-6 text-accent-warning opacity-20 group-hover:opacity-100 transition-opacity">
+<span class="material-symbols-outlined text-4xl">psychology_alt</span>
+</div>
+<div class="flex items-center gap-3 mb-6">
+<div class="p-2 rounded-lg bg-accent-warning/10 text-accent-warning">
+<span class="material-symbols-outlined">tips_and_updates</span>
+</div>
+<h3 class="text-xl font-bold text-text-main dark:text-white">Areas for Improvement</h3>
+</div>
+<ul class="space-y-4">
+<li class="flex gap-3 text-text-main dark:text-gray-200 leading-relaxed">
+<span class="material-symbols-outlined text-accent-warning mt-0.5 text-xl">priority_high</span>
+<span>Be specific: replace "databases" with "PostgreSQL".</span>
+</li>
+<li class="flex gap-3 text-text-main dark:text-gray-200 leading-relaxed">
+<span class="material-symbols-outlined text-accent-warning mt-0.5 text-xl">priority_high</span>
+<span>Conclusion trailed off; end on a firm summary.</span>
+</li>
+</ul>
+</div>
+<div class="group relative bg-card-light dark:bg-card-dark rounded-xl p-8 shadow-soft hover:shadow-lg transition-all duration-300 border-t-4 border-accent-vocab">
+<div class="absolute top-6 right-6 text-accent-vocab opacity-20 group-hover:opacity-100 transition-opacity">
+<span class="material-symbols-outlined text-4xl">auto_awesome</span>
+</div>
+<div class="flex items-center gap-3 mb-6">
+<div class="p-2 rounded-lg bg-accent-vocab/10 text-accent-vocab">
+<span class="material-symbols-outlined">spellcheck</span>
+</div>
+<h3 class="text-xl font-bold text-text-main dark:text-white">Professional Alternatives</h3>
+</div>
+<p class="text-sm text-text-muted mb-4">Stronger synonyms to increase impact.</p>
+<div class="space-y-4">
+<div class="flex flex-col gap-1">
+<div class="flex items-center gap-2 text-sm text-text-muted">
+<span>Instead of</span>
+<span class="line-through decoration-red-400 decoration-2 opacity-70">"really good"</span>
+</div>
+<div class="flex items-center gap-2 flex-wrap">
+<span class="material-symbols-outlined text-accent-vocab text-lg">arrow_right_alt</span>
+<span class="font-bold text-primary dark:text-teal-300 text-lg">"Exceptional"</span>
+</div>
+</div>
+<div class="h-px bg-gray-100 dark:bg-gray-700 w-full"></div>
+<div class="flex flex-col gap-1">
+<div class="flex items-center gap-2 text-sm text-text-muted">
+<span>Instead of</span>
+<span class="line-through decoration-red-400 decoration-2 opacity-70">"worked on"</span>
+</div>
+<div class="flex items-center gap-2 flex-wrap">
+<span class="material-symbols-outlined text-accent-vocab text-lg">arrow_right_alt</span>
+<span class="font-bold text-primary dark:text-teal-300 text-lg">"Spearheaded"</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="w-full max-w-4xl mx-auto">
+<div class="relative bg-gradient-to-br from-coach-light to-white dark:from-gray-800 dark:to-gray-800/50 rounded-3xl p-8 md:p-10 border border-coach-primary/20 text-center shadow-lg">
+<div class="absolute top-0 right-0 p-8 opacity-5">
+<span class="material-symbols-outlined text-9xl text-coach-primary">mic_external_on</span>
+</div>
+<div class="relative z-10 flex flex-col items-center gap-6">
+<div>
+<h3 class="text-2xl font-bold text-text-main dark:text-white mb-2">Ready to apply this feedback?</h3>
+<p class="text-text-muted dark:text-gray-400 max-w-xl mx-auto">
+                            Let's work on this question again together. I'm ready when you are!
+                        </p>
+</div>
+<div class="flex flex-col md:flex-row items-center justify-center gap-4 w-full">
+<button class="group relative flex items-center justify-center gap-3 bg-white dark:bg-transparent border-2 border-coach-primary hover:bg-coach-primary hover:text-white text-coach-primary text-lg font-bold px-8 py-4 rounded-full shadow-md hover:shadow-xl hover:-translate-y-1 transition-all duration-300 min-w-[260px] w-full md:w-auto overflow-hidden">
+<span class="material-symbols-outlined text-2xl group-hover:scale-110 transition-transform">mic</span>
+<span>Practice with Coach</span>
+</button>
+<button class="group relative flex items-center justify-center gap-3 bg-primary hover:bg-primary-hover text-white text-lg font-bold px-10 py-4 rounded-full shadow-lg hover:shadow-xl hover:-translate-y-1 transition-all duration-300 min-w-[260px] w-full md:w-auto">
+<span>Next Question</span>
+<span class="material-symbols-outlined group-hover:translate-x-1 transition-transform">arrow_forward</span>
+</button>
+</div>
+<div class="text-xs font-semibold text-coach-dark/60 dark:text-gray-500 uppercase tracking-widest mt-2">
+                        Collaborative Mode Active
+                    </div>
+</div>
+</div>
+</div>
+</main>
+<footer class="w-full py-6 text-center text-xs text-text-muted/50 dark:text-gray-600">
+<p>Interview Coach AI • Session ID: #8829-XJ • <a class="hover:underline" href="#">Privacy Policy</a></p>
+</footer>
+
+</body></html>

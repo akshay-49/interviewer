@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Welcome to AI Interview Coach</title>
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#365c63",
+                        "primary-dark": "#2a484e",
+                        "accent": "#5F9479",
+                        "background-light": "#f9fafa",
+                        "background-dark": "#22252a",
+                        "surface-light": "#ffffff",
+                        "surface-dark": "#2d3138",
+                        "text-main": "#121617",
+                        "text-muted": "#657c81",
+                    },
+                    fontFamily: {
+                        "display": ["Manrope", "sans-serif"]
+                    },
+                    borderRadius: {"DEFAULT": "0.5rem", "lg": "0.75rem", "xl": "1rem", "2xl": "1.5rem", "full": "9999px"},
+                    boxShadow: {
+                        'soft': '0 4px 20px -2px rgba(0, 0, 0, 0.05)',
+                        'glow': '0 0 15px rgba(54, 92, 99, 0.2)',
+                    }
+                },
+            },
+        }
+    </script>
+</head>
+<body class="bg-background-light dark:bg-background-dark text-text-main dark:text-gray-100 font-display transition-colors duration-300">
+<div class="relative flex min-h-screen w-full flex-col overflow-hidden">
+<!-- Abstract Background Decoration -->
+<div class="absolute top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none">
+<div class="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-primary/5 blur-[120px]"></div>
+<div class="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] rounded-full bg-accent/10 blur-[120px]"></div>
+</div>
+<!-- Header -->
+<header class="w-full px-6 py-6 md:px-10 lg:px-20 flex items-center justify-between z-10">
+<div class="flex items-center gap-3 select-none">
+<div class="size-8 flex items-center justify-center rounded-lg bg-primary/10 text-primary dark:text-white dark:bg-white/10">
+<span class="material-symbols-outlined text-2xl">graphic_eq</span>
+</div>
+<h2 class="text-lg font-bold tracking-tight text-text-main dark:text-white">AI Interview Coach</h2>
+</div>
+<!-- Minimal Nav / Status -->
+<div class="hidden sm:flex items-center gap-4">
+<span class="text-xs font-medium px-3 py-1 rounded-full bg-gray-100 dark:bg-surface-dark text-text-muted">Beta v1.0</span>
+</div>
+</header>
+<!-- Main Content Area -->
+<main class="flex-grow flex flex-col items-center justify-center px-4 py-10 md:px-10 z-10">
+<div class="w-full max-w-4xl flex flex-col items-center text-center gap-8 md:gap-12">
+<!-- Hero Text Section -->
+<div class="flex flex-col gap-6 items-center max-w-2xl animate-fade-in-up">
+<h1 class="text-4xl md:text-6xl font-extrabold leading-[1.1] tracking-tight text-text-main dark:text-white">
+                        Voice-Based AI <br class="hidden md:block"/>
+<span class="text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent">Interview Coach</span>
+</h1>
+<p class="text-lg md:text-xl text-text-muted dark:text-gray-400 font-medium leading-relaxed max-w-xl">
+                        Master your tech interview skills in a calm environment. Practice answering real questions using just your voice.
+                    </p>
+</div>
+<!-- Primary Action -->
+<div class="flex flex-col items-center gap-8 w-full">
+<button class="group relative flex items-center gap-3 px-8 py-4 bg-primary hover:bg-primary-dark text-white rounded-xl shadow-glow transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]">
+<span class="material-symbols-outlined text-2xl group-hover:animate-pulse">mic</span>
+<span class="text-lg font-bold tracking-wide">Start Interview Session</span>
+</button>
+<!-- Permission Card -->
+<div class="relative w-full max-w-md">
+<!-- Card visual background/border -->
+<div class="absolute -inset-0.5 bg-gradient-to-b from-gray-200 to-transparent dark:from-gray-700 rounded-2xl opacity-50 pointer-events-none"></div>
+<div class="relative flex flex-col sm:flex-row items-start sm:items-center gap-5 p-6 bg-surface-light dark:bg-surface-dark rounded-2xl shadow-soft border border-gray-100 dark:border-gray-800 backdrop-blur-sm">
+<div class="flex-shrink-0 size-12 rounded-full bg-accent/10 flex items-center justify-center text-accent">
+<span class="material-symbols-outlined text-2xl">keyboard_voice</span>
+</div>
+<div class="flex flex-col text-left gap-1">
+<h3 class="text-base font-bold text-text-main dark:text-white">Microphone Access Required</h3>
+<p class="text-sm text-text-muted dark:text-gray-400 leading-relaxed">
+                                    To simulate a real conversation, you will answer questions only by speaking. Please enable your mic when prompted.
+                                </p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Footer -->
+<footer class="w-full py-8 px-6 text-center z-10">
+<div class="flex flex-col items-center justify-center gap-4">
+<div class="flex items-center gap-6">
+<a class="text-sm text-text-muted hover:text-primary transition-colors" href="#">Privacy Policy</a>
+<span class="text-gray-300 dark:text-gray-700">•</span>
+<a class="text-sm text-text-muted hover:text-primary transition-colors" href="#">About</a>
+</div>
+<p class="text-xs text-gray-400 dark:text-gray-600">© 2024 AI Interview Coach. All rights reserved.</p>
+</div>
+</footer>
+</div>
+</body></html>

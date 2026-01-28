@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Listening State - Speak Now</title>
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Theme Configuration -->
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#365c63",
+                        "background-light": "#f9fafa",
+                        "background-dark": "#22252a",
+                        "surface-dark": "#2c3036",
+                        "text-main": "#121617",
+                        "text-muted": "#657c81",
+                    },
+                    fontFamily: {
+                        "display": ["Manrope", "sans-serif"]
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.5rem",
+                        "lg": "1rem",
+                        "xl": "1.5rem",
+                        "full": "9999px"
+                    },
+                    animation: {
+                        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'sound-wave': 'wave 1.2s ease-in-out infinite',
+                    },
+                    keyframes: {
+                        wave: {
+                            '0%, 100%': { height: '10px' },
+                            '50%': { height: '32px' },
+                        }
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        /* Custom Animations not easily doable with standard Tailwind utilities */
+        
+        .mic-ripple {
+            position: absolute;
+            border-radius: 50%;
+            background-color: #365c63;
+            opacity: 0;
+            animation: ripple 2.5s cubic-bezier(0, 0.2, 0.8, 1) infinite;
+        }
+
+        .mic-ripple:nth-child(1) { animation-delay: 0s; }
+        .mic-ripple:nth-child(2) { animation-delay: 0.8s; }
+        .mic-ripple:nth-child(3) { animation-delay: 1.6s; }
+
+        @keyframes ripple {
+            0% {
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                opacity: 0.15;
+                transform: scale(1);
+            }
+            100% {
+                top: -40px;
+                left: -40px;
+                right: -40px;
+                bottom: -40px;
+                opacity: 0;
+                transform: scale(1.5);
+            }
+        }
+
+        /* Waveform Bar Delays */
+        .wave-bar:nth-child(1) { animation-delay: 0.0s; height: 16px; }
+        .wave-bar:nth-child(2) { animation-delay: 0.2s; height: 24px; }
+        .wave-bar:nth-child(3) { animation-delay: 0.4s; height: 32px; }
+        .wave-bar:nth-child(4) { animation-delay: 0.1s; height: 20px; }
+        .wave-bar:nth-child(5) { animation-delay: 0.5s; height: 28px; }
+        .wave-bar:nth-child(6) { animation-delay: 0.3s; height: 18px; }
+        
+        /* Smooth height transition for bars */
+        .wave-bar {
+            transition: height 0.1s ease;
+        }
+
+        @keyframes wave {
+            0%, 100% { height: 12px; opacity: 0.5; }
+            50% { height: 40px; opacity: 1; }
+        }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark font-display text-text-main dark:text-gray-100 transition-colors duration-300">
+<div class="relative flex h-screen w-full flex-col overflow-hidden">
+<!-- Header -->
+<header class="flex items-center justify-between border-b border-[#ebefef] dark:border-gray-800 px-6 py-4 md:px-10">
+<div class="flex items-center gap-3">
+<div class="size-8 text-primary flex items-center justify-center rounded-lg bg-primary/10">
+<span class="material-symbols-outlined text-[20px]">graphic_eq</span>
+</div>
+<h2 class="text-text-main dark:text-white text-lg font-bold tracking-tight">Speak Now</h2>
+</div>
+<button class="group flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-bold text-text-muted hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-surface-dark transition-colors">
+<span class="material-symbols-outlined text-[20px]">close</span>
+<span class="hidden sm:inline">End Session</span>
+</button>
+</header>
+<!-- Main Content -->
+<main class="flex flex-1 flex-col items-center justify-between py-8 px-4 md:px-0 relative z-10">
+<!-- Question Context -->
+<div class="flex w-full max-w-3xl flex-col items-center gap-6 text-center animate-fade-in-down">
+<div class="space-y-4">
+<p class="text-text-muted dark:text-gray-500 text-sm font-medium uppercase tracking-widest">Question 3 of 5</p>
+<h1 class="text-text-main dark:text-white text-2xl md:text-3xl font-bold leading-tight px-4 opacity-90 transition-opacity hover:opacity-100 cursor-default">
+                        "Tell me about a time you had to debug a difficult error."
+                    </h1>
+</div>
+<!-- Optional: Hint/Context toggle could go here, keeping it hidden for minimal view -->
+</div>
+<!-- Central Active Listening State -->
+<div class="flex flex-col items-center justify-center flex-1 w-full max-w-md gap-10">
+<!-- Status Text -->
+<p class="text-primary dark:text-teal-400 text-xl md:text-2xl font-bold tracking-tight animate-pulse">
+                    Listening... Please answer now
+                </p>
+<!-- Visual Anchor -->
+<div class="relative flex items-center justify-center py-10">
+<!-- Ripple Effects Container -->
+<div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+<div class="mic-ripple w-32 h-32 md:w-40 md:h-40 bg-primary/20 dark:bg-primary/30"></div>
+<div class="mic-ripple w-32 h-32 md:w-40 md:h-40 bg-primary/20 dark:bg-primary/30"></div>
+<div class="mic-ripple w-32 h-32 md:w-40 md:h-40 bg-primary/20 dark:bg-primary/30"></div>
+</div>
+<!-- Main Mic Button -->
+<div class="relative z-10 flex h-32 w-32 md:h-40 md:w-40 items-center justify-center rounded-full bg-primary shadow-[0_20px_40px_-12px_rgba(54,92,99,0.5)] dark:shadow-[0_20px_40px_-12px_rgba(54,92,99,0.8)] transition-transform hover:scale-105 active:scale-95 cursor-pointer">
+<span class="material-symbols-outlined text-white text-[48px] md:text-[64px]">mic</span>
+</div>
+</div>
+<!-- Waveform & Timer Container -->
+<div class="flex flex-col items-center gap-3 w-full">
+<!-- Animated Waveform -->
+<div class="flex items-center justify-center gap-1.5 h-12">
+<div class="wave-bar w-1.5 rounded-full bg-primary dark:bg-teal-400 animate-[wave_1.2s_ease-in-out_infinite]"></div>
+<div class="wave-bar w-1.5 rounded-full bg-primary dark:bg-teal-400 animate-[wave_1.1s_ease-in-out_infinite]"></div>
+<div class="wave-bar w-1.5 rounded-full bg-primary dark:bg-teal-400 animate-[wave_1.5s_ease-in-out_infinite]"></div>
+<div class="wave-bar w-1.5 rounded-full bg-primary dark:bg-teal-400 animate-[wave_0.9s_ease-in-out_infinite]"></div>
+<div class="wave-bar w-1.5 rounded-full bg-primary dark:bg-teal-400 animate-[wave_1.3s_ease-in-out_infinite]"></div>
+<div class="wave-bar w-1.5 rounded-full bg-primary dark:bg-teal-400 animate-[wave_1.0s_ease-in-out_infinite]"></div>
+<div class="wave-bar w-1.5 rounded-full bg-primary dark:bg-teal-400 animate-[wave_1.4s_ease-in-out_infinite]"></div>
+</div>
+<!-- Timer -->
+<span class="text-text-muted dark:text-gray-400 text-lg font-medium font-mono tabular-nums tracking-wider bg-gray-100 dark:bg-surface-dark px-3 py-1 rounded-md">
+                        00:45
+                    </span>
+</div>
+</div>
+<!-- Footer Controls -->
+<div class="w-full max-w-md flex flex-col gap-4 pb-8">
+<!-- Primary Action -->
+<button class="w-full flex items-center justify-center gap-3 h-14 rounded-xl bg-primary hover:bg-[#2a4a50] text-white text-lg font-bold shadow-lg shadow-primary/20 transition-all transform active:scale-[0.98]">
+<span class="material-symbols-outlined">check_circle</span>
+                    I'm Done Speaking
+                </button>
+<!-- Secondary Action -->
+<button class="w-full flex items-center justify-center gap-2 h-10 rounded-lg text-text-muted hover:text-primary dark:text-gray-400 dark:hover:text-white text-sm font-semibold transition-colors">
+<span class="material-symbols-outlined text-[18px]">replay</span>
+                    Repeat Question
+                </button>
+</div>
+</main>
+<!-- Abstract Background Shape (Bottom Right) -->
+<div class="absolute -bottom-32 -right-32 w-96 h-96 rounded-full bg-primary/5 dark:bg-primary/10 blur-3xl pointer-events-none z-0"></div>
+<!-- Abstract Background Shape (Top Left) -->
+<div class="absolute -top-32 -left-32 w-96 h-96 rounded-full bg-primary/5 dark:bg-primary/10 blur-3xl pointer-events-none z-0"></div>
+</div>
+</body></html>

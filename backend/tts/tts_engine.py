@@ -1,42 +1,65 @@
-from TTS.api import TTS
-import tempfile
+import azure.cognitiveservices.speech as speechsdk
 import os
-import soundfile as sf
+from io import BytesIO
 
-# --------------------------------------------------
-# Load model ONCE
-# --------------------------------------------------
+from dotenv import load_dotenv
+from backend.config import DEFAULT_TTS_VOICE
 
-tts = TTS(
-    model_name="tts_models/en/vctk/vits",
-    gpu=False
-)
+load_dotenv()
 
-# Choose a consistent interviewer voice
-INTERVIEWER_SPEAKER = "p225"  # calm, neutral, professional
+
+AZURE_SPEECH_KEY = os.getenv("AZURE_SPEECH_KEY")
+AZURE_SPEECH_REGION = os.getenv("AZURE_SPEECH_REGION", "eastus")
+
+# Voice selection - professional, clear, neutral
+INTERVIEWER_VOICE = DEFAULT_TTS_VOICE
+
+if not AZURE_SPEECH_KEY:
+    print("WARNING: AZURE_SPEECH_KEY not set. TTS will fail.")
+    print("Set it with: $env:AZURE_SPEECH_KEY='your_key_here' (PowerShell)")
 
 
 def synthesize_speech(text: str) -> bytes:
     """
-    Convert text to natural-sounding interviewer speech.
+    Convert text to natural-sounding interviewer speech using Azure AI Speech.
     Returns WAV audio bytes.
     """
     if not text or not text.strip():
         raise ValueError("Empty text passed to TTS")
+    
+    if not AZURE_SPEECH_KEY:
+        raise ValueError(
+            "Azure Speech API key not configured. "
+            "Set AZURE_SPEECH_KEY environment variable."
+        )
 
-    # Generate waveform
-    wav = tts.tts(
-        text=text,
-        speaker=INTERVIEWER_SPEAKER
+    # Configure Azure Speech
+    speech_config = speechsdk.SpeechConfig(
+        subscription=AZURE_SPEECH_KEY,
+        region=AZURE_SPEECH_REGION
     )
-
-    # Write proper WAV bytes
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
-        sf.write(f.name, wav, samplerate=22050)
-        path = f.name
-
-    try:
-        with open(path, "rb") as audio_file:
-            return audio_file.read()
-    finally:
-        os.remove(path)
+    
+    # Set voice and audio format
+    speech_config.speech_synthesis_voice_name = INTERVIEWER_VOICE
+    
+    # Create synthesizer without audio output (we'll get audio data directly from result)
+    speech_synthesizer = speechsdk.SpeechSynthesizer(
+        speech_config=speech_config,
+        audio_config=None  # None means we get the audio data in the result
+    )
+    
+    # Synthesize speech
+    result = speech_synthesizer.speak_text_async(text).get()
+    
+    # Check result
+    if result.reason == speechsdk.ResultReason.SynthesizingAudioCompleted:
+        # Return audio data as bytes
+        return result.audio_data
+    elif result.reason == speechsdk.ResultReason.Canceled:
+        cancellation = result.cancellation_details
+        error_msg = f"Speech synthesis canceled: {cancellation.reason}"
+        if cancellation.reason == speechsdk.CancellationReason.Error:
+            error_msg += f" Error details: {cancellation.error_details}"
+        raise RuntimeError(error_msg)
+    else:
+        raise RuntimeError(f"Speech synthesis failed with reason: {result.reason}")

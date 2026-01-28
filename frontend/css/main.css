@@ -1,0 +1,98 @@
+/* Material Symbols Icon Font */
+.material-symbols-outlined {
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+/* Custom Animations */
+@keyframes fade-in-up {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes countdown {
+    0% {
+        stroke-dashoffset: 0;
+    }
+    100% {
+        stroke-dashoffset: 251;
+    }
+}
+
+@keyframes float {
+    0%, 100% {
+        transform: translateY(0);
+    }
+    50% {
+        transform: translateY(-10px);
+    }
+}
+
+.animate-fade-in-up {
+    animation: fade-in-up 0.6s ease-out;
+}
+
+.animate-countdown {
+    animation: countdown 2s linear forwards;
+}
+
+.animate-float {
+    animation: float 6s ease-in-out infinite;
+}
+
+.progress-ring__circle {
+    transition: stroke-dashoffset 0.35s;
+    transform: rotate(-90deg);
+    transform-origin: 50% 50%;
+}
+
+/* Base Styles */
+body {
+    margin: 0;
+    padding: 0;
+    font-family: 'Manrope', sans-serif;
+}
+
+/* Screen Container */
+.screen {
+    min-height: 100vh;
+    display: none;
+}
+
+.screen.active {
+    display: flex;
+}
+
+/* Smooth Transitions */
+.fade-transition {
+    animation: fade-in-up 0.3s ease-out;
+}
+
+/* Utility Classes */
+.fixed-nav {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 50;
+}
+
+/* Responsive Container */
+@media (max-width: 768px) {
+    .container-responsive {
+        padding: 1rem;
+    }
+}
+
+@media (min-width: 768px) {
+    .container-responsive {
+        max-width: 1024px;
+        margin: 0 auto;
+        padding: 2.5rem;
+    }
+}

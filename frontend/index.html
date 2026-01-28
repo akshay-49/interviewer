@@ -1,74 +1,37 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>AI Interview</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Interview Coach</title>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+    <!-- Azure Speech SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/microsoft-cognitiveservices-speech-sdk@latest/distrib/browser/microsoft.cognitiveservices.speech.sdk.bundle.min.js"></script>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <script>
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#365c63",
+                        "primary-hover": "#2a484e",
+                        "background-light": "#f9fafa",
+                        "background-dark": "#22252a",
+                        "accent-green": "#518151",
+                        "accent-gold": "#A6835B",
+                    },
+                    fontFamily: {
+                        "display": ["Manrope", "sans-serif"]
+                    },
+                    borderRadius: {"DEFAULT": "0.5rem", "lg": "1rem", "xl": "1.5rem", "full": "9999px"},
+                },
+            },
+        }
+    </script>
 </head>
 <body>
-
-  <button id="start">Start Interview</button>
-  <br><br>
-
-  <input id="answer" placeholder="Type answer here" />
-  <button id="send">Send Answer</button>
-
-  <pre id="text"></pre>
-
-  <script>
-    const API = "http://127.0.0.1:8000";
-
-    let sessionId = null;
-
-    function playBase64Audio(base64) {
-      const binary = atob(base64);
-      const bytes = new Uint8Array([...binary].map(c => c.charCodeAt(0)));
-      const blob = new Blob([bytes], { type: "audio/wav" });
-      const audio = new Audio(URL.createObjectURL(blob));
-      audio.play();
-    }
-
-    document.getElementById("start").onclick = async () => {
-      const res = await fetch(`${API}/interview/start`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          role: "Model Based Systems Engineer",
-          experience: "Intern"
-        })
-      });
-
-      const data = await res.json();
-      sessionId = data.session_id;
-
-      document.getElementById("text").textContent = data.question;
-      playBase64Audio(data.audio);
-    };
-
-    document.getElementById("send").onclick = async () => {
-      const answer = document.getElementById("answer").value;
-      document.getElementById("answer").value = "";
-
-      const res = await fetch(`${API}/interview/answer`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          session_id: sessionId,
-          answer: answer
-        })
-      });
-
-      const data = await res.json();
-
-      if (data.final) {
-        document.getElementById("text").textContent = data.spoken_closing;
-  playBase64Audio(data.audio);
-}
- else {
-        document.getElementById("text").textContent = data.question;
-        playBase64Audio(data.audio);
-      }
-    };
-  </script>
-
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
 </body>
 </html>

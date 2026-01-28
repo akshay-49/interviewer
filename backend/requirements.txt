@@ -4,9 +4,9 @@ langgraph
 langchain
 langchain-core
 langchain-community
+langchain-openai
 langchain-ollama
-faster-whisper
 python-multipart
-soundfile
-sounddevice
 pydantic
+python-dotenv
+requests
