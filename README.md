@@ -20,36 +20,47 @@ An interactive interview platform with real-time speech recognition, AI-powered 
 - **Python 3.11+**
 - **FastAPI** - REST API framework
 - **LangChain** - LLM orchestration
-- **LangGraph** - Workflow management
-- **Whisper API** - Speech-to-text (via OpenAI)
-- **pyttsx3** - Text-to-speech
+- **LangGraph** - Agentic workflow management
+- **Pydantic** - Data validation
+- **Uvicorn** - ASGI server
 
 ### Frontend
-- **Next.js 16** - React framework
-- **TypeScript** - Type safety
+- **React 19** - UI framework
+- **Vite 5** - Build tool & dev server
+- **Tailwind CSS 3** - Utility-first styling
 - **Web Speech API** - Browser speech recognition
-- **CSS3** - Responsive styling
+- **Azure Speech Services** - Text-to-speech
+- **JavaScript (ES6+)** - Dynamic interactivity
 
 ## Project Structure
 
 ```
 interviewer/
 ├── backend/
-│   ├── agents.py          # LLM agents for question/evaluation/feedback
+│   ├── agents.py          # LLM agents for Q&A, evaluation
+│   ├── config.py          # Configuration settings
 │   ├── graph.py           # LangGraph workflow
 │   ├── llm.py             # LLM configurations
 │   ├── models.py          # Pydantic models
 │   ├── nodes.py           # Graph nodes
 │   ├── main.py            # FastAPI server
-│   ├── requirements.txt    # Python dependencies
-│   ├── stt_app/           # Speech-to-text utilities
-│   └── tts/               # Text-to-speech utilities
+│   └── requirements.txt    # Python dependencies
 ├── frontend/
-│   └── voice-interviewer/
-│       ├── app/           # Next.js app directory
-│       ├── public/        # Static assets
-│       ├── package.json   # Node dependencies
-│       └── tsconfig.json  # TypeScript config
+│   ├── src/
+│   │   ├── components/    # React components
+│   │   ├── context/       # React context
+│   │   ├── hooks/         # Custom hooks
+│   │   ├── utils/         # Utility functions
+│   │   ├── App.jsx        # Main app component
+│   │   └── main.jsx       # Vite entry point
+│   ├── public/            # Static assets
+│   ├── screens/           # Screen templates
+│   ├── css/               # Tailwind styling
+│   ├── js/                # JavaScript modules
+│   ├── index.html         # HTML entry point
+│   ├── package.json       # Node dependencies
+│   └── vite.config.js     # Vite configuration
+├── interview_graph.mmd    # Interview flow diagram
 └── README.md
 ```
 
@@ -75,12 +86,12 @@ Backend runs on `http://127.0.0.1:8000`
 ### Frontend Setup
 
 ```bash
-cd frontend/voice-interviewer
+cd frontend
 npm install
 npm run dev
 ```
 
-Frontend runs on `http://localhost:3000`
+Frontend runs on `http://localhost:5173` (Vite default)
 
 ## Interview Flow
 
