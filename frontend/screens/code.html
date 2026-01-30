@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>InterviewPrep AI - Transition</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#365c63",
+                        "secondary": "#5F9479",
+                        "background-light": "#f9fafa",
+                        "background-dark": "#22252a",
+                    },
+                    fontFamily: {
+                        "display": ["Manrope", "sans-serif"]
+                    },
+                    borderRadius: {"DEFAULT": "0.5rem", "lg": "1rem", "xl": "1.5rem", "full": "9999px"},
+                    animation: {
+                        'countdown': 'countdown 2s linear forwards',
+                        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                        'float': 'float 6s ease-in-out infinite',
+                    },
+                    keyframes: {
+                        countdown: {
+                            '0%': { strokeDashoffset: '0' },
+                            '100%': { strokeDashoffset: '251' },
+                        },
+                        float: {
+                            '0%, 100%': { transform: 'translateY(0)' },
+                            '50%': { transform: 'translateY(-10px)' },
+                        }
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        /* Custom styles for the circular progress */
+        .progress-ring__circle {
+            transition: stroke-dashoffset 0.35s;
+            transform: rotate(-90deg);
+            transform-origin: 50% 50%;
+        }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark font-display text-[#121617] dark:text-gray-100 overflow-hidden transition-colors duration-300">
+<div class="relative flex h-screen w-full flex-col overflow-hidden">
+<!-- Background Ambient Effects -->
+<div class="absolute inset-0 z-0 overflow-hidden pointer-events-none">
+<!-- Large soft gradient blob -->
+<div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-secondary/10 dark:bg-primary/20 rounded-full blur-[100px] animate-pulse-slow"></div>
+<!-- Smaller accent blob -->
+<div class="absolute top-1/4 right-1/4 w-[300px] h-[300px] bg-primary/5 dark:bg-secondary/10 rounded-full blur-[80px]"></div>
+</div>
+<!-- Header -->
+<header class="relative z-20 flex items-center justify-between px-6 py-4 md:px-10 md:py-6">
+<div class="flex items-center gap-3">
+<div class="flex items-center justify-center size-10 rounded-xl bg-primary/10 text-primary dark:text-white dark:bg-primary/30">
+<span class="material-symbols-outlined text-2xl">graphic_eq</span>
+</div>
+<h2 class="text-lg font-bold tracking-tight text-primary dark:text-gray-100">InterviewPrep AI</h2>
+</div>
+<div class="flex items-center gap-4">
+<button class="hidden md:flex items-center justify-center h-10 px-4 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm text-sm font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+<span class="material-symbols-outlined mr-2 text-[20px]">settings</span>
+                    Settings
+                </button>
+<div class="relative group cursor-pointer">
+<div class="size-10 rounded-full bg-cover bg-center border-2 border-white dark:border-gray-700 shadow-md transition-transform transform group-hover:scale-105" data-alt="User profile avatar showing a smiling person" style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuAp1GQYUMElOUheXx3rCN199VV85fUq4Jku2Kc2towqCUBstgiBvirbE9lsnyhiHkPA46EHKurgDM9A2afBQtZjk_tGCxMwIY_Qg9Ae-nOELjNg8H1TyxFaLA4lBzqxtxsGyUMJ05EAoTYU7aaN8SQKY7aKy82-d4QYwGt2_HbiZC0nlfs4ZCtgnMdF825duHk7CnHZsza23g-lkqSBMOEUBoqEWbvUr5zRPtINUvabYPu7aEoRsu_w-nh-Yyfl6rxjQMXShNHs5g-J')">
+</div>
+</div>
+</div>
+</header>
+<!-- Main Content (Centered) -->
+<main class="relative z-10 flex flex-1 flex-col items-center justify-center px-4 w-full max-w-4xl mx-auto">
+<div class="flex flex-col items-center text-center animate-float">
+<!-- Circular Countdown Timer & Icon -->
+<div class="relative flex items-center justify-center mb-10">
+<!-- SVG Ring -->
+<svg class="w-32 h-32 md:w-40 md:h-40 transform" viewbox="0 0 100 100">
+<!-- Track -->
+<circle class="text-gray-200 dark:text-gray-800 stroke-current" cx="50" cy="50" fill="transparent" r="40" stroke-width="4"></circle>
+<!-- Progress (Animated) -->
+<circle class="text-primary dark:text-secondary progress-ring__circle stroke-current animate-countdown" cx="50" cy="50" fill="transparent" r="40" stroke-linecap="round" stroke-width="4" style="stroke-dasharray: 251; stroke-dashoffset: 0;"></circle>
+</svg>
+<!-- Center Status Icon -->
+<div class="absolute inset-0 flex items-center justify-center">
+<div class="flex items-center justify-center w-20 h-20 rounded-full bg-primary/10 dark:bg-secondary/20 text-primary dark:text-secondary shadow-sm backdrop-blur-sm">
+<span class="material-symbols-outlined text-5xl">check</span>
+</div>
+</div>
+</div>
+<!-- Primary Feedback Message -->
+<h1 class="text-3xl md:text-5xl font-extrabold tracking-tight text-gray-900 dark:text-white mb-4 leading-tight">
+                    Great job, that was a solid answer.
+                </h1>
+<!-- Secondary Context Subtext -->
+<div class="flex flex-col items-center gap-2">
+<p class="text-lg md:text-xl font-medium text-gray-500 dark:text-gray-400">
+                        Next up: <span class="text-primary dark:text-secondary font-bold">System Design Basics</span>
+</p>
+<div class="mt-4 flex items-center gap-2 px-4 py-2 bg-white/50 dark:bg-gray-800/50 backdrop-blur-md rounded-full border border-gray-100 dark:border-gray-700">
+<span class="material-symbols-outlined text-primary dark:text-secondary text-sm animate-spin">sync</span>
+<span class="text-sm font-semibold text-gray-600 dark:text-gray-300">Generating next question...</span>
+</div>
+</div>
+</div>
+</main>
+<!-- Footer -->
+<footer class="relative z-10 w-full py-8 text-center">
+<div aria-live="assertive" class="sr-only">
+                Great job, that was a solid answer. Next up: System Design Basics. Moving to next topic in 2 seconds.
+            </div>
+<div class="flex flex-col items-center gap-4">
+<div class="flex gap-8">
+<a class="text-sm font-medium text-gray-400 hover:text-primary dark:hover:text-secondary transition-colors" href="#">Skip Topic</a>
+<a class="text-sm font-medium text-gray-400 hover:text-primary dark:hover:text-secondary transition-colors" href="#">Pause Session</a>
+</div>
+<p class="text-xs text-gray-300 dark:text-gray-600">© 2024 InterviewPrep AI</p>
+</div>
+</footer>
+</div>
+</body></html>

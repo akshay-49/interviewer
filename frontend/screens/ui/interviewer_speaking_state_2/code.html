@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>InterviewPrep AI - Listening</title>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#365c63",
+                        "background-light": "#f9fafa",
+                        "background-dark": "#22252a",
+                    },
+                    fontFamily: {
+                        "display": ["Manrope", "sans-serif"]
+                    },
+                    borderRadius: {"DEFAULT": "0.5rem", "lg": "1rem", "xl": "1.5rem", "full": "9999px"},
+                    animation: {
+                        'wave': 'wave 1.2s ease-in-out infinite',
+                        'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                    },
+                    keyframes: {
+                        wave: {
+                            '0%, 100%': { height: '10%' },
+                            '50%': { height: '100%' },
+                        }
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .wave-bar {
+            animation: wave 1s ease-in-out infinite;
+        }
+        .wave-bar:nth-child(1) { animation-duration: 0.8s; animation-delay: 0.1s; }
+        .wave-bar:nth-child(2) { animation-duration: 1.1s; animation-delay: 0.2s; }
+        .wave-bar:nth-child(3) { animation-duration: 1.3s; animation-delay: 0.3s; }
+        .wave-bar:nth-child(4) { animation-duration: 0.9s; animation-delay: 0.1s; }
+        .wave-bar:nth-child(5) { animation-duration: 1.2s; animation-delay: 0.4s; }
+        
+        /* Glassmorphism utility for modern look */
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+        }
+        .dark .glass-panel {
+            background: rgba(30, 33, 38, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark text-[#121617] dark:text-[#f0f0f0] font-display min-h-screen flex flex-col overflow-x-hidden transition-colors duration-300">
+<!-- Header -->
+<header class="w-full border-b border-[#ebefef] dark:border-gray-800 bg-white/50 dark:bg-[#22252a]/50 backdrop-blur-sm sticky top-0 z-10">
+<div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+<div class="flex items-center gap-3">
+<div class="size-8 bg-primary/10 rounded-lg flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-xl">graphic_eq</span>
+</div>
+<h2 class="text-lg font-bold tracking-tight">InterviewPrep AI</h2>
+</div>
+<div class="hidden md:flex items-center gap-4">
+<span class="text-sm font-medium text-gray-500 dark:text-gray-400">Junior Frontend Developer Interview</span>
+<div class="h-4 w-px bg-gray-200 dark:bg-gray-700"></div>
+<button class="text-sm font-bold text-gray-600 dark:text-gray-300 hover:text-red-500 transition-colors">
+                    End Session
+                </button>
+</div>
+<div class="md:hidden">
+<span class="material-symbols-outlined text-gray-700 dark:text-gray-300">menu</span>
+</div>
+</div>
+</header>
+<!-- Main Content -->
+<main class="flex-grow flex flex-col items-center justify-center p-6 sm:p-10 relative">
+<!-- Decorative subtle gradient blob in background -->
+<div class="absolute top-1/4 left-1/4 w-96 h-96 bg-primary/5 rounded-full blur-3xl -z-10 animate-pulse-slow"></div>
+<div class="absolute bottom-1/4 right-1/4 w-80 h-80 bg-teal-200/10 dark:bg-teal-900/10 rounded-full blur-3xl -z-10 animate-pulse-slow" style="animation-delay: 1s;"></div>
+<!-- Main Card -->
+<div class="glass-panel w-full max-w-4xl rounded-2xl shadow-xl shadow-gray-200/50 dark:shadow-black/20 overflow-hidden flex flex-col md:flex-row min-h-[500px]">
+<!-- Left/Top Content: Context & Question -->
+<div class="flex-1 p-8 md:p-12 flex flex-col justify-between border-b md:border-b-0 md:border-r border-gray-100 dark:border-gray-800 bg-white dark:bg-[#1e2126]">
+<!-- Progress Header -->
+<div class="flex flex-col gap-4 mb-8">
+<div class="flex justify-between items-center">
+<span class="text-primary font-bold text-sm uppercase tracking-wider">Question 2 of 8</span>
+<span class="text-gray-400 dark:text-gray-500 text-xs font-semibold">Technical Knowledge</span>
+</div>
+<div class="h-1.5 w-full bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+<div class="h-full bg-primary rounded-full transition-all duration-500" style="width: 25%;"></div>
+</div>
+</div>
+<!-- The Question -->
+<div class="flex-grow flex flex-col justify-center">
+<h1 class="text-2xl md:text-3xl lg:text-4xl font-bold leading-tight tracking-tight text-gray-900 dark:text-gray-50">
+                        Could you explain the difference between <code class="bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded text-primary text-[0.9em] font-mono">null</code> and <code class="bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded text-primary text-[0.9em] font-mono">undefined</code> in JavaScript?
+                    </h1>
+<p class="mt-6 text-gray-500 dark:text-gray-400 text-lg leading-relaxed">
+                        And give an example of when you might encounter each in a real-world scenario.
+                    </p>
+</div>
+<!-- Hint/Skip Controls -->
+<div class="mt-8 flex gap-4 pt-4">
+<button class="text-sm font-semibold text-gray-400 dark:text-gray-500 hover:text-primary transition-colors flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">lightbulb</span>
+                        Get a hint
+                    </button>
+<button class="text-sm font-semibold text-gray-400 dark:text-gray-500 hover:text-primary transition-colors flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">skip_next</span>
+                        Skip question
+                    </button>
+</div>
+</div>
+<!-- Right/Bottom Panel: AI Visualizer & Interaction State -->
+<div class="w-full md:w-[320px] bg-gray-50 dark:bg-[#1a1d21] p-8 flex flex-col items-center justify-center text-center relative">
+<!-- Visualizer Container -->
+<div class="flex-1 flex flex-col items-center justify-center w-full">
+<!-- Distinctive Sound Wave Visualization -->
+<div aria-hidden="true" class="h-32 flex items-center justify-center gap-2 mb-6">
+<div class="w-2.5 bg-primary/80 dark:bg-primary/90 rounded-full h-12 wave-bar"></div>
+<div class="w-2.5 bg-primary/80 dark:bg-primary/90 rounded-full h-20 wave-bar"></div>
+<div class="w-2.5 bg-primary/80 dark:bg-primary/90 rounded-full h-16 wave-bar"></div>
+<div class="w-2.5 bg-primary/80 dark:bg-primary/90 rounded-full h-24 wave-bar"></div>
+<div class="w-2.5 bg-primary/80 dark:bg-primary/90 rounded-full h-10 wave-bar"></div>
+</div>
+<p class="text-primary font-bold text-lg animate-pulse">Interviewer is speaking...</p>
+<p class="text-gray-400 dark:text-gray-500 text-sm mt-2">Please wait until they finish.</p>
+</div>
+<!-- Disabled User Control -->
+<div class="mt-auto pt-8 w-full flex flex-col items-center gap-4">
+<!-- Disabled Mic Button -->
+<div class="relative group cursor-not-allowed opacity-50 grayscale transition-all duration-300">
+<div class="absolute -inset-1 bg-gray-200 dark:bg-gray-700 rounded-full blur opacity-25"></div>
+<button class="relative size-16 flex items-center justify-center rounded-full bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm" disabled="">
+<span class="material-symbols-outlined text-gray-400 dark:text-gray-500 text-3xl">mic_off</span>
+</button>
+</div>
+<span class="text-xs font-bold text-gray-400 uppercase tracking-widest">Mic Disabled</span>
+</div>
+</div>
+</div>
+<!-- Transcript Preview (Context specific addition) -->
+<div class="mt-8 w-full max-w-2xl text-center opacity-60 hover:opacity-100 transition-opacity cursor-pointer group">
+<div class="flex items-center justify-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+<span class="material-symbols-outlined text-[18px]">keyboard_arrow_up</span>
+<span class="font-medium">Show Transcript</span>
+</div>
+</div>
+</main>
+</body></html>
