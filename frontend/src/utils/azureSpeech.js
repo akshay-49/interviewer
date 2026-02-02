@@ -245,17 +245,30 @@ export async function speakText(text, voiceName = 'en-US-JennyNeural') {
             const synthesizer = new SpeechSDK.SpeechSynthesizer(speechConfig);
             currentSynthesizer = synthesizer;
             
+            let audioPlaybackStarted = false;
+            
+            // Estimate audio duration: ~80ms per character (typical speech rate ~150 WPM = 2.5 words/sec)
+            // Average word length is 5 chars, so: (text.length / 5 chars/word) / 2.5 words/sec * 1000 ms/sec = text.length * 80 ms
+            const estimatedDurationMs = Math.max(text.length * 80, 200); // At least 200ms
+            console.log(`Estimated audio duration: ${estimatedDurationMs}ms for text length: ${text.length} chars`);
+            
             // Speak the text
             synthesizer.speakTextAsync(
                 text,
                 result => {
                     if (result.reason === SpeechSDK.ResultReason.SynthesizingAudioCompleted) {
-                        console.log('Speech synthesis completed');
-                        synthesizer.close();
-                        if (currentSynthesizer === synthesizer) {
-                            currentSynthesizer = null;
-                        }
-                        resolve();
+                        audioPlaybackStarted = true;
+                        console.log('Speech synthesis completed, waiting for audio playback...');
+                        
+                        // Wait for estimated audio duration to ensure audio has played
+                        setTimeout(() => {
+                            console.log('Audio playback complete, resolving');
+                            synthesizer.close();
+                            if (currentSynthesizer === synthesizer) {
+                                currentSynthesizer = null;
+                            }
+                            resolve();
+                        }, estimatedDurationMs);
                     } else {
                         console.error('Speech synthesis failed:', result.errorDetails);
                         synthesizer.close();
@@ -279,4 +292,15 @@ export async function speakText(text, voiceName = 'en-US-JennyNeural') {
             reject(error);
         }
     });
+}
+
+export function stopSpeechPlayback() {
+    if (currentSynthesizer) {
+        try {
+            currentSynthesizer.close();
+        } catch (e) {
+            console.warn('Error closing synthesizer:', e);
+        }
+        currentSynthesizer = null;
+    }
 }

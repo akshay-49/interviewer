@@ -1,0 +1,253 @@
+"""Cosmos DB (SQL API) collections and models for interview sessions and results"""
+import os
+from pathlib import Path
+from datetime import datetime
+from azure.cosmos import CosmosClient, exceptions
+from azure.cosmos.partition_key import PartitionKey
+from dotenv import load_dotenv
+from pydantic import BaseModel, Field
+from typing import List, Optional, Dict, Any
+
+# Load .env from project root
+root_dir = Path(__file__).parent.parent.parent
+load_dotenv(root_dir / '.env')
+
+# Cosmos DB connection string (SQL API)
+COSMOS_CONNECTION_STRING = os.getenv("COSMOS_CONNECTION_STRING", "")
+
+if not COSMOS_CONNECTION_STRING:
+    raise ValueError("COSMOS_CONNECTION_STRING not found in environment variables")
+
+# Database and container names
+DATABASE_NAME = "interviewer"
+SESSIONS_CONTAINER = "sessions"
+USERS_CONTAINER = "users"
+
+# Create Cosmos DB client
+try:
+    client = CosmosClient.from_connection_string(COSMOS_CONNECTION_STRING)
+    # Get or create database
+    db = client.create_database_if_not_exists(id=DATABASE_NAME)
+    
+    # Get or create containers with proper PartitionKey
+    try:
+        sessions_container = db.create_container_if_not_exists(
+            id=SESSIONS_CONTAINER,
+            partition_key=PartitionKey(path="/user_id")
+        )
+    except exceptions.CosmosResourceExistsError:
+        sessions_container = db.get_container_client(SESSIONS_CONTAINER)
+    
+    try:
+        users_container = db.create_container_if_not_exists(
+            id=USERS_CONTAINER,
+            partition_key=PartitionKey(path="/user_id")
+        )
+    except exceptions.CosmosResourceExistsError:
+        users_container = db.get_container_client(USERS_CONTAINER)
+    
+    print("✅ Connected to Cosmos DB (SQL API)")
+except Exception as e:
+    print(f"❌ Could not connect to Cosmos DB: {e}")
+    raise
+
+
+# Pydantic Models
+class AnswerRecord(BaseModel):
+    """Model for storing individual answer and evaluation"""
+    question_number: int
+    question_text: str
+    question_topic: str
+    user_answer: str
+    recording_blob_url: Optional[str] = None  # URL to blob storage recording
+    evaluation_score: float
+    evaluation_feedback: str
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+class SessionResult(BaseModel):
+    """Model for complete interview session result"""
+    session_id: str
+    user_id: str
+    user_email: str
+    user_name: Optional[str] = None
+    job_title: Optional[str] = None
+    company_name: Optional[str] = None
+    total_questions: int
+    answers: List[AnswerRecord] = []
+    hints_used: int = 0
+    questions_skipped: int = 0
+    overall_score: Optional[float] = None
+    summary: Optional[Dict[str, Any]] = None  # what_went_well, areas_for_improvement, recommendations
+    closing_audio_blob_url: Optional[str] = None
+    started_at: datetime = Field(default_factory=datetime.utcnow)
+    completed_at: Optional[datetime] = None
+    duration_seconds: Optional[int] = None
+    
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat() if v else None
+        }
+
+
+# Helper function to serialize datetime objects
+def serialize_for_cosmos(data):
+    """Recursively convert datetime objects to ISO format strings"""
+    if isinstance(data, datetime):
+        return data.isoformat()
+    elif isinstance(data, dict):
+        return {key: serialize_for_cosmos(value) for key, value in data.items()}
+    elif isinstance(data, list):
+        return [serialize_for_cosmos(item) for item in data]
+    else:
+        return data
+
+
+# Container management functions
+def init_cosmos_db():
+    """Initialize Cosmos DB containers (already created in client initialization)"""
+    try:
+        print("✅ Cosmos DB containers initialized (sessions, users)")
+    except Exception as e:
+        print(f"⚠️  Error initializing Cosmos DB: {e}")
+
+
+def create_session(session_data: Dict[str, Any]) -> str:
+    """Create new session record"""
+    try:
+        # Serialize all datetime objects to ISO format strings
+        serialized_data = serialize_for_cosmos(session_data)
+        
+        # Add required Cosmos DB id field (should match partition key)
+        serialized_data['id'] = serialized_data['session_id']
+        result = sessions_container.create_item(body=serialized_data)
+        return result['session_id']
+    except exceptions.CosmosResourceExistsError:
+        print(f"Session {session_data['session_id']} already exists")
+        return session_data['session_id']
+    except Exception as e:
+        print(f"Error creating session: {e}")
+        raise
+
+
+def get_session(session_id: str) -> Optional[Dict]:
+    """Get session by session_id"""
+    try:
+        query = "SELECT * FROM sessions WHERE sessions.session_id = @session_id"
+        items = list(sessions_container.query_items(
+            query=query,
+            parameters=[{"name": "@session_id", "value": session_id}],
+            max_item_count=1
+        ))
+        return items[0] if items else None
+    except Exception as e:
+        print(f"Error getting session: {e}")
+        return None
+
+
+def get_user_sessions(user_id: str, limit: int = 50) -> List[Dict]:
+    """Get all sessions for a user, sorted by date (newest first)"""
+    try:
+        query = """
+            SELECT * FROM sessions 
+            WHERE sessions.user_id = @user_id 
+            ORDER BY sessions.completed_at DESC
+        """
+        items = list(sessions_container.query_items(
+            query=query,
+            parameters=[{"name": "@user_id", "value": user_id}],
+            max_item_count=limit
+        ))
+        return items
+    except Exception as e:
+        print(f"Error getting user sessions: {e}")
+        return []
+
+
+def add_answer_to_session(session_id: str, answer_record: AnswerRecord) -> bool:
+    """Add an answer to existing session"""
+    try:
+        session = get_session(session_id)
+        if not session:
+            print(f"Session {session_id} not found")
+            return False
+        
+        # Add answer to session
+        if 'answers' not in session:
+            session['answers'] = []
+        
+        # Convert answer record to dict and serialize datetime fields
+        answer_dict = serialize_for_cosmos(answer_record.dict(by_alias=True))
+        
+        session['answers'].append(answer_dict)
+        session['updated_at'] = datetime.utcnow().isoformat()
+        
+        # Update the session
+        sessions_container.upsert_item(session)
+        return True
+    except Exception as e:
+        print(f"Error adding answer to session: {e}")
+        return False
+
+
+def update_session_summary(session_id: str, summary: Dict, overall_score: float, 
+                          hints_used: int, questions_skipped: int) -> bool:
+    """Update session with final summary and metadata"""
+    try:
+        session = get_session(session_id)
+        if not session:
+            print(f"Session {session_id} not found")
+            return False
+        
+        session.update({
+            'summary': summary,
+            'overall_score': overall_score,
+            'hints_used': hints_used,
+            'questions_skipped': questions_skipped,
+            'completed_at': datetime.utcnow().isoformat()
+        })
+        
+        sessions_container.upsert_item(session)
+        return True
+    except Exception as e:
+        print(f"Error updating session summary: {e}")
+        return False
+
+
+def update_session_closing_audio(session_id: str, audio_blob_url: str) -> bool:
+    """Update session with closing audio blob URL"""
+    try:
+        session = get_session(session_id)
+        if not session:
+            print(f"Session {session_id} not found")
+            return False
+        
+        session['closing_audio_blob_url'] = audio_blob_url
+        sessions_container.upsert_item(session)
+        return True
+    except Exception as e:
+        print(f"Error updating session closing audio: {e}")
+        return False
+
+
+def delete_session(session_id: str) -> bool:
+    """Delete session record"""
+    try:
+        session = get_session(session_id)
+        if not session:
+            print(f"Session {session_id} not found")
+            return False
+        
+        # Delete using both id and partition key
+        sessions_container.delete_item(item=session['id'], partition_key=session['user_id'])
+        return True
+    except exceptions.CosmosResourceNotFoundError:
+        return False
+    except Exception as e:
+        print(f"Error deleting session: {e}")
+        return False
+
+
+def get_db():
+    """Returns the database instance"""
+    return db

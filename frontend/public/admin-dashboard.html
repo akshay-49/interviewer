@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html class="light" lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Admin Overview Dashboard - AI Interview Pro</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200;300;400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#13cbec",
+                        "background-light": "#f8fafb",
+                        "sidebar-light": "#f1f5f9",
+                        "card-border": "#e2e8f0",
+                        "text-main": "#0f172a",
+                        "text-muted": "#64748b",
+                    },
+                    fontFamily: {
+                        "display": ["Manrope", "sans-serif"]
+                    },
+                    borderRadius: { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" },
+                },
+            },
+        }
+    </script>
+<style type="text/tailwindcss">
+        body {
+            font-family: 'Manrope', sans-serif;
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .custom-shadow {
+            shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+        }
+    </style>
+</head>
+<body class="bg-background-light text-text-main transition-colors duration-200">
+<div class="flex h-screen overflow-hidden">
+<aside class="w-72 bg-sidebar-light border-r border-card-border flex flex-col transition-colors">
+<div class="p-6">
+<div class="flex items-center gap-3 mb-10">
+<div class="w-10 h-10 bg-primary rounded-xl flex items-center justify-center text-white shadow-lg shadow-primary/20">
+<span class="material-symbols-outlined">mic_none</span>
+</div>
+<div>
+<h1 class="text-lg font-bold leading-tight text-text-main">AI Interview Pro</h1>
+<p class="text-text-muted text-xs font-medium uppercase tracking-wider">Platform Admin</p>
+</div>
+</div>
+<nav class="flex flex-col gap-1">
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg bg-white text-primary shadow-sm border border-card-border/50" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="text-sm font-bold">Overview</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-text-muted hover:bg-white/50 hover:text-text-main transition-all" href="#">
+<span class="material-symbols-outlined">group</span>
+<span class="text-sm font-semibold">User Management</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-text-muted hover:bg-white/50 hover:text-text-main transition-all" href="#">
+<span class="material-symbols-outlined">quiz</span>
+<span class="text-sm font-semibold">Question Bank</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-text-muted hover:bg-white/50 hover:text-text-main transition-all" href="#">
+<span class="material-symbols-outlined">bar_chart</span>
+<span class="text-sm font-semibold">Analytics</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-text-muted hover:bg-white/50 hover:text-text-main transition-all" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="text-sm font-semibold">System Settings</span>
+</a>
+</nav>
+</div>
+<div class="mt-auto p-6 border-t border-card-border">
+<div class="flex items-center gap-3">
+<div class="size-10 rounded-full bg-cover bg-center border-2 border-white shadow-sm" style='background-image: url("https://lh3.googleusercontent.com/aida-public/AB6AXuDTC4ZpPhiK_8GYbt5ZXQ2pbqRyLvqnoEpQLGewX7qSLE5aR2jT9_mwEvuq8vrkp9N8gERgzWNE9dcSHnZ-TZgu97z8xT3kuceUnH1K_PBEGH8AecP8MQZv5yM4LhLYZT0DM470gzH1vPLfjxP5otS-fE2gKnsL2DEKZpBPsJifazeBM7_YnDV6-6h6pREwptbiDfLuz90GOSzfAUzJGVou2T2I-vhxwZ8804TK3OD7WlwmNaPBhrCSQ-sg1b6tZM72xgXfnQbXkon7");'></div>
+<div class="flex flex-col">
+<span class="text-sm font-bold text-text-main">Alex Johnson</span>
+<span class="text-xs text-text-muted">System Admin</span>
+</div>
+<button class="ml-auto text-text-muted hover:text-red-500 transition-colors">
+<span class="material-symbols-outlined">logout</span>
+</button>
+</div>
+</div>
+</aside>
+<main class="flex-1 flex flex-col overflow-y-auto bg-background-light">
+<header class="sticky top-0 z-30 flex items-center justify-between px-8 py-4 bg-white/90 backdrop-blur-md border-b border-card-border">
+<div class="flex items-center gap-6 flex-1">
+<h2 class="text-xl font-extrabold text-text-main hidden md:block">Dashboard Overview</h2>
+<div class="relative max-w-md w-full">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-text-muted">search</span>
+<input class="w-full bg-slate-100 border-none rounded-lg pl-10 pr-4 py-2 focus:ring-2 focus:ring-primary/50 text-sm transition-all text-text-main placeholder-text-muted/60" placeholder="Search users, sessions, or reports..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<button class="relative p-2 bg-slate-100 rounded-lg text-text-muted hover:text-primary transition-colors">
+<span class="material-symbols-outlined">notifications</span>
+<span class="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-white"></span>
+</button>
+<button class="p-2 bg-slate-100 rounded-lg text-text-muted hover:text-primary transition-colors">
+<span class="material-symbols-outlined">help_outline</span>
+</button>
+<div class="h-8 w-px bg-card-border"></div>
+<button class="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg text-sm font-bold shadow-lg shadow-primary/25 hover:brightness-105 transition-all">
+<span class="material-symbols-outlined text-sm">add</span>
+<span>New Interview</span>
+</button>
+</div>
+</header>
+<div class="p-8 space-y-8 max-w-[1600px] mx-auto w-full">
+<div class="flex flex-wrap items-end justify-between gap-4">
+<div class="space-y-1">
+<p class="text-3xl font-black tracking-tight text-text-main">Platform Insights</p>
+<p class="text-text-muted font-medium">Real-time performance metrics and active voice sessions.</p>
+</div>
+<div class="flex gap-3">
+<button class="flex items-center gap-2 px-4 py-2 bg-white border border-card-border rounded-lg text-sm font-bold text-text-main hover:bg-slate-50 shadow-sm transition-all">
+<span class="material-symbols-outlined text-sm">calendar_today</span>
+<span>Last 30 Days</span>
+</button>
+<button class="flex items-center gap-2 px-4 py-2 bg-white border border-card-border rounded-lg text-sm font-bold text-text-main hover:bg-slate-50 shadow-sm transition-all">
+<span class="material-symbols-outlined text-sm">download</span>
+<span>Export Data</span>
+</button>
+</div>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+<div class="bg-white p-6 rounded-xl border border-card-border shadow-sm hover:shadow-md transition-shadow">
+<div class="flex justify-between items-start mb-4">
+<div class="p-2 bg-blue-50 rounded-lg text-blue-600">
+<span class="material-symbols-outlined">person</span>
+</div>
+<span class="text-[#059669] text-xs font-bold px-2.5 py-1 bg-emerald-50 border border-emerald-100 rounded-full">+12.5%</span>
+</div>
+<p class="text-text-muted text-sm font-semibold mb-1">Total Users</p>
+<p class="text-3xl font-bold tracking-tight text-text-main">24,892</p>
+</div>
+<div class="bg-white p-6 rounded-xl border border-card-border shadow-sm hover:shadow-md transition-shadow">
+<div class="flex justify-between items-start mb-4">
+<div class="p-2 bg-purple-50 rounded-lg text-purple-600">
+<span class="material-symbols-outlined">mic</span>
+</div>
+<span class="text-[#059669] text-xs font-bold px-2.5 py-1 bg-emerald-50 border border-emerald-100 rounded-full">+8.2%</span>
+</div>
+<p class="text-text-muted text-sm font-semibold mb-1">Interviews Conducted</p>
+<p class="text-3xl font-bold tracking-tight text-text-main">12,450</p>
+</div>
+<div class="bg-white p-6 rounded-xl border border-card-border shadow-sm hover:shadow-md transition-shadow">
+<div class="flex justify-between items-start mb-4">
+<div class="p-2 bg-amber-50 rounded-lg text-amber-600">
+<span class="material-symbols-outlined">star</span>
+</div>
+<span class="text-[#dc2626] text-xs font-bold px-2.5 py-1 bg-red-50 border border-red-100 rounded-full">-2.1%</span>
+</div>
+<p class="text-text-muted text-sm font-semibold mb-1">Avg. Performance Score</p>
+<p class="text-3xl font-bold tracking-tight text-text-main">82.4%</p>
+</div>
+<div class="bg-white p-6 rounded-xl border border-card-border shadow-sm hover:shadow-md transition-shadow">
+<div class="flex justify-between items-start mb-4">
+<div class="p-2 bg-emerald-50 rounded-lg text-emerald-600">
+<span class="material-symbols-outlined">dns</span>
+</div>
+<div class="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 border border-emerald-100 rounded-full">
+<span class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
+<span class="text-emerald-700 text-xs font-bold uppercase tracking-wider">Stable</span>
+</div>
+</div>
+<p class="text-text-muted text-sm font-semibold mb-1">System Health</p>
+<p class="text-3xl font-bold tracking-tight text-text-main">99.98%</p>
+</div>
+</div>
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+<div class="lg:col-span-2 bg-white rounded-xl border border-card-border p-6 shadow-sm">
+<div class="flex items-center justify-between mb-8">
+<div>
+<h3 class="text-lg font-bold text-text-main">Interview Trends</h3>
+<p class="text-sm text-text-muted">Weekly growth in voice-first sessions</p>
+</div>
+<div class="text-right">
+<p class="text-3xl font-bold text-primary">3,420</p>
+<p class="text-xs text-emerald-600 font-bold uppercase tracking-tighter">Sessions this week</p>
+</div>
+</div>
+<div class="relative h-64 w-full">
+<svg class="w-full h-full" preserveAspectRatio="none" viewBox="0 0 100 40">
+<defs>
+<linearGradient id="gradient" x1="0%" x2="0%" y1="0%" y2="100%">
+<stop offset="0%" stop-color="#13cbec" stop-opacity="0.3"></stop>
+<stop offset="100%" stop-color="#13cbec" stop-opacity="0"></stop>
+</linearGradient>
+</defs>
+<path d="M0,40 L0,25 C10,22 15,35 25,30 C35,25 45,10 55,15 C65,20 75,5 85,8 C95,11 100,2 100,2 L100,40 Z" fill="url(#gradient)"></path>
+<path d="M0,25 C10,22 15,35 25,30 C35,25 45,10 55,15 C65,20 75,5 85,8 C95,11 100,2 100,2" fill="none" stroke="#13cbec" stroke-linecap="round" stroke-width="1.5"></path>
+</svg>
+</div>
+<div class="flex justify-between mt-6 px-2">
+<span class="text-xs font-bold text-text-muted">Mon</span>
+<span class="text-xs font-bold text-text-muted">Tue</span>
+<span class="text-xs font-bold text-text-muted">Wed</span>
+<span class="text-xs font-bold text-text-muted">Thu</span>
+<span class="text-xs font-bold text-text-muted">Fri</span>
+<span class="text-xs font-bold text-text-muted">Sat</span>
+<span class="text-xs font-bold text-text-muted">Sun</span>
+</div>
+</div>
+<div class="bg-white rounded-xl border border-card-border p-6 shadow-sm flex flex-col">
+<div class="flex items-center justify-between mb-6">
+<h3 class="text-lg font-bold text-text-main">Recent Activity</h3>
+<span class="text-[10px] font-bold text-primary uppercase tracking-widest bg-primary/5 px-2 py-1 rounded">Live Feed</span>
+</div>
+<div class="space-y-6 overflow-y-auto max-h-[420px] pr-2 custom-scrollbar">
+<div class="flex gap-4">
+<div class="size-10 shrink-0 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-100">
+<span class="material-symbols-outlined text-sm">person_add</span>
+</div>
+<div class="flex flex-col gap-0.5">
+<p class="text-sm font-bold text-text-main">New user signup</p>
+<p class="text-xs text-text-muted leading-relaxed">Sarah Williams joined the platform as a Candidate.</p>
+<span class="text-[10px] text-slate-400 font-semibold mt-1">2 mins ago</span>
+</div>
+</div>
+<div class="flex gap-4">
+<div class="size-10 shrink-0 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100">
+<span class="material-symbols-outlined text-sm">check_circle</span>
+</div>
+<div class="flex flex-col gap-0.5">
+<p class="text-sm font-bold text-text-main">Interview Completed</p>
+<p class="text-xs text-text-muted leading-relaxed">Jordan Smith finished Senior Developer interview with 88% score.</p>
+<span class="text-[10px] text-slate-400 font-semibold mt-1">15 mins ago</span>
+</div>
+</div>
+<div class="flex gap-4">
+<div class="size-10 shrink-0 rounded-full bg-primary/10 text-primary flex items-center justify-center border border-primary/20">
+<span class="material-symbols-outlined text-sm">mic</span>
+</div>
+<div class="flex flex-col gap-0.5">
+<p class="text-sm font-bold text-text-main">Session Started</p>
+<p class="text-xs text-text-muted leading-relaxed">Active session: AI Voice screening for UX Research role.</p>
+<span class="text-[10px] text-slate-400 font-semibold mt-1">42 mins ago</span>
+</div>
+</div>
+<div class="flex gap-4">
+<div class="size-10 shrink-0 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-100">
+<span class="material-symbols-outlined text-sm">warning</span>
+</div>
+<div class="flex flex-col gap-0.5">
+<p class="text-sm font-bold text-text-main">System Maintenance</p>
+<p class="text-xs text-text-muted leading-relaxed">Database cleanup scheduled for tonight at 02:00 AM.</p>
+<span class="text-[10px] text-slate-400 font-semibold mt-1">1 hour ago</span>
+</div>
+</div>
+</div>
+<button class="mt-auto pt-6 w-full py-2 bg-slate-50 text-xs font-bold text-text-muted rounded-lg border border-card-border hover:bg-slate-100 transition-colors">
+                        View All Activity
+                    </button>
+</div>
+</div>
+<div class="bg-white rounded-xl border border-card-border p-6 shadow-sm">
+<div class="flex items-center justify-between mb-6">
+<div>
+<h3 class="text-lg font-bold text-text-main">Live AI Interviews</h3>
+<p class="text-sm text-text-muted">Real-time status of ongoing candidate screenings</p>
+</div>
+<span class="flex items-center gap-2 text-xs font-bold text-red-600 bg-red-50 border border-red-100 px-4 py-1.5 rounded-full">
+<span class="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+                        Live Now: 14
+                    </span>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left">
+<thead class="text-[11px] text-text-muted uppercase font-bold tracking-widest border-b border-card-border">
+<tr>
+<th class="pb-4 pr-4">Candidate</th>
+<th class="pb-4 px-4">Role</th>
+<th class="pb-4 px-4">Stage</th>
+<th class="pb-4 px-4">Voice Quality</th>
+<th class="pb-4 pl-4 text-right">Action</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-card-border">
+<tr class="group hover:bg-slate-50/50 transition-colors">
+<td class="py-5 pr-4">
+<div class="flex items-center gap-3">
+<div class="size-10 rounded-full bg-slate-100 bg-cover bg-center border border-card-border shadow-sm" style='background-image: url("https://lh3.googleusercontent.com/aida-public/AB6AXuAL7-Hbn0GdzGrfagqKvdZY5vZI7I0wujgzuXpHTuHCsDQMmoX5N72j64En2hcYs-2-iXroB6lJWm2lgMmvjHTuRKmccRzSoQErOl8ZvXVcFjk8wh90BtnwalZvwx0GFiNC3OwRsyOUglxuBNiLSAfQztmG4wpG9epXzut241fjYVwFFt2Jt9GyPxDx8L6zLf9mqc0IOw1mcDzGpC59x087ekGfKAt7p4k6kX5C57KRvX8j3tL2n7Ts7KhIcMBgMbV9SLm0vDOFqsk3");'></div>
+<div>
+<p class="text-sm font-bold text-text-main">Eleanor Pena</p>
+<p class="text-[10px] text-text-muted font-medium">Joined 4m ago</p>
+</div>
+</div>
+</td>
+<td class="py-5 px-4 text-sm font-medium text-text-main">Product Manager</td>
+<td class="py-5 px-4">
+<span class="text-[10px] font-bold px-2.5 py-1 bg-primary/10 text-primary border border-primary/20 rounded-md uppercase tracking-wider">Speaking</span>
+</td>
+<td class="py-5 px-4">
+<div class="flex items-center gap-3">
+<div class="w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+<div class="h-full bg-primary" style="width: 75%"></div>
+</div>
+<span class="text-xs font-bold text-text-main">75%</span>
+</div>
+</td>
+<td class="py-5 pl-4 text-right">
+<button class="text-text-muted hover:text-primary transition-colors p-2 rounded-lg hover:bg-white shadow-sm hover:shadow-md">
+<span class="material-symbols-outlined">monitoring</span>
+</button>
+</td>
+</tr>
+<tr class="group hover:bg-slate-50/50 transition-colors">
+<td class="py-5 pr-4">
+<div class="flex items-center gap-3">
+<div class="size-10 rounded-full bg-slate-100 bg-cover bg-center border border-card-border shadow-sm" style='background-image: url("https://lh3.googleusercontent.com/aida-public/AB6AXuB0g43r2Q1IxWKG-Ct7gtGzix_tzl3SNPTj-hNismD4mY0qiMg8FfYY7ghpif8LjmHozAiWmneMDjqSUdXCdDebN58OyJ0cW5ntrFCRQOC0hCVbVHpDB-26l-oHndO3Pn7A1AOqEufqyNzRF0IuNMstRnhju-Txw2sMAPmWHVwQgeq0BcdlbnjF9InWd8s2ylT1cpxao_FErEWH6pa4Ax0_3o_tJHP_brzZHLG-dEudK8h6yEtuirnWoILGq__ugIzlQsVjkM8cbdeO");'></div>
+<div>
+<p class="text-sm font-bold text-text-main">Robert Fox</p>
+<p class="text-[10px] text-text-muted font-medium">Joined 12m ago</p>
+</div>
+</div>
+</td>
+<td class="py-5 px-4 text-sm font-medium text-text-main">Data Analyst</td>
+<td class="py-5 px-4">
+<span class="text-[10px] font-bold px-2.5 py-1 bg-slate-100 text-slate-500 border border-slate-200 rounded-md uppercase tracking-wider">Processing</span>
+</td>
+<td class="py-5 px-4">
+<div class="flex items-center gap-3">
+<div class="w-24 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+<div class="h-full bg-primary" style="width: 92%"></div>
+</div>
+<span class="text-xs font-bold text-text-main">92%</span>
+</div>
+</td>
+<td class="py-5 pl-4 text-right">
+<button class="text-text-muted hover:text-primary transition-colors p-2 rounded-lg hover:bg-white shadow-sm hover:shadow-md">
+<span class="material-symbols-outlined">monitoring</span>
+</button>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+</main>
+</div>
+
+</body></html>

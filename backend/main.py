@@ -12,16 +12,21 @@ import logging
 import requests
 from datetime import datetime, timedelta
 
-from backend.models import InterviewState
+from backend.interview.models import InterviewState
 from typing import cast
-from backend.graph import build_graph_strict, build_graph_coach
-from backend.agents import hint_agent
-from backend.config import (
+from backend.interview.graph import build_graph_strict, build_graph_coach
+from backend.interview.agents import hint_agent
+from backend.core.config import (
     DEFAULT_PERSONA,
     AVAILABLE_PERSONAS,
     SESSION_TTL_MINUTES,
     MAX_SESSIONS
 )
+from backend.auth.routes import router as auth_router
+from backend.interview.recording_routes import router as recording_router
+from backend.interview.history_routes import router as history_router
+from backend.core.cosmos import init_cosmos_db
+from backend.interview.enhanced_session_manager import SessionManager
 
 # Configure logging
 logging.basicConfig(
@@ -43,6 +48,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include authentication routes
+app.include_router(auth_router)
+
+# Include recording management routes
+app.include_router(recording_router)
+
+# Include history/sessions routes
+app.include_router(history_router)
+
+# Initialize Cosmos DB
+init_cosmos_db()
 
 # --------------------------------------------------
 # LangGraph (build once)
@@ -125,6 +142,7 @@ class AnswerRequest(BaseModel):
     session_id: str
     answer: str
     skip: Optional[bool] = False
+    recording_blob_url: Optional[str] = None  # URL to recording in blob storage
 
 
 class EndSessionRequest(BaseModel):
@@ -206,6 +224,23 @@ def start_interview(req: StartInterviewRequest):
         "experience": req.experience,
         "persona": persona,
     }
+    
+    # Create Cosmos DB session for tracking and history
+    try:
+        # Get user info from context if available (can be enhanced with auth later)
+        user_id = getattr(req, 'user_id', 'anonymous')
+        user_email = getattr(req, 'user_email', 'anonymous@example.com')
+        
+        SessionManager.create_session(
+            user_id=user_id,
+            user_email=user_email,
+            user_name=getattr(req, 'user_name', None),
+            job_title=getattr(req, 'job_title', None),
+            company_name=getattr(req, 'company_name', None),
+            total_questions=0  # Will be updated as questions are asked
+        )
+    except Exception as e:
+        logger.warning(f"Could not create Cosmos DB session: {e}")
 
     # Validate inputs
     if not req.role or not req.role.strip():
@@ -260,6 +295,7 @@ def start_interview(req: StartInterviewRequest):
     return {
         "session_id": session_id,
         "question": question,
+        "total_questions": 5,  # Default interview has 5 questions
     }
 
 # --------------------------------------------------
@@ -303,6 +339,36 @@ def answer_interview(req: AnswerRequest):
             )
 
         closing_text = result["spoken_closing"]
+        
+        # Try to store the answer to Cosmos DB before returning
+        try:
+            # Get the current question and evaluation data
+            current_question = result.get("current_question")
+            question_count = result.get("question_count", 0)
+            
+            if result.get("evaluation"):
+                ev = result["evaluation"]
+                evaluation_score = ev.score if hasattr(ev, 'score') else ev.get('score', 0)
+                evaluation_feedback = ev.feedback if hasattr(ev, 'feedback') else ev.get('feedback', '')
+                question_topic = ev.topic if hasattr(ev, 'topic') else ev.get('topic', 'General')
+            else:
+                evaluation_score = 0
+                evaluation_feedback = ''
+                question_topic = 'General'
+            
+            # Store answer with recording if provided
+            SessionManager.add_answer_to_session(
+                session_id=req.session_id,
+                question_number=question_count,
+                question_text=current_question or "Question",
+                question_topic=question_topic,
+                user_answer=req.answer,
+                evaluation_score=evaluation_score,
+                evaluation_feedback=evaluation_feedback,
+                recording_blob_url=req.recording_blob_url
+            )
+        except Exception as e:
+            logger.warning(f"Could not store answer to Cosmos DB: {e}")
 
         # Extract evaluation data for the last question
         evaluation_data = None
@@ -314,6 +380,24 @@ def answer_interview(req: AnswerRequest):
                 "strengths": ev.strengths if hasattr(ev, 'strengths') else ev.get('strengths', []),
                 "weaknesses": ev.weaknesses if hasattr(ev, 'weaknesses') else ev.get('weaknesses', []),
             }
+
+        # Store final session results to Cosmos DB
+        try:
+            summary = result.get("summary", {})
+            overall_score = sum(result.get("score_history", [])) / max(len(result.get("score_history", [])), 1) if result.get("score_history") else 0
+            hints_used = len([h for h in result.get("evaluations_history", []) if h])  # Placeholder
+            questions_skipped = len([q for q in result.get("weak_topics", [])])  # Placeholder
+            
+            SessionManager.complete_session(
+                session_id=req.session_id,
+                summary=summary,
+                overall_score=overall_score,
+                hints_used=hints_used,
+                questions_skipped=questions_skipped,
+                closing_audio_blob_url=None  # Can be set if closing audio is generated
+            )
+        except Exception as e:
+            logger.warning(f"Could not complete session in Cosmos DB: {e}")
 
         return {
             "final": True,
@@ -342,6 +426,34 @@ def answer_interview(req: AnswerRequest):
     # (3) this is the first pause for this answer (transition not yet set)
     if feedback and interrupt_payload.get("continue") and not transition:
         logger.info(f"Coach feedback step: session={req.session_id}")
+        
+        # Store the answer with evaluation to Cosmos DB
+        try:
+            current_question = result.get("current_question")
+            question_count = result.get("question_count", 0)
+            
+            if result.get("evaluation"):
+                ev = result["evaluation"]
+                evaluation_score = ev.score if hasattr(ev, 'score') else ev.get('score', 0)
+                evaluation_feedback = ev.feedback if hasattr(ev, 'feedback') else ev.get('feedback', '')
+                question_topic = ev.topic if hasattr(ev, 'topic') else ev.get('topic', 'General')
+            else:
+                evaluation_score = 0
+                evaluation_feedback = ''
+                question_topic = 'General'
+            
+            SessionManager.add_answer_to_session(
+                session_id=req.session_id,
+                question_number=question_count,
+                question_text=current_question or "Question",
+                question_topic=question_topic,
+                user_answer=req.answer,
+                evaluation_score=evaluation_score,
+                evaluation_feedback=evaluation_feedback,
+                recording_blob_url=req.recording_blob_url
+            )
+        except Exception as e:
+            logger.warning(f"Could not store answer to Cosmos DB: {e}")
 
         # Capture current question for retry and display
         question = result.get("current_question") or interrupt_payload.get("prompt")
@@ -425,7 +537,7 @@ def end_interview(req: EndSessionRequest):
     # Step 2: If we don't have a summary, manually call end_interview_agent
     if not result.get("summary"):
         logger.info("No summary from graph, calling end_interview_agent directly")
-        from backend.agents import end_interview_agent
+        from backend.interview.agents import end_interview_agent
         
         # The end_interview_agent needs score_history and weak_topics from state
         # which should be in the graph's memory now

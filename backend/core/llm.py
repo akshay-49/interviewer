@@ -1,5 +1,5 @@
 from langchain_ollama import ChatOllama
-from backend.models import Question, Evaluation, Feedback, Hint, EvaluationWithFeedback, SpokenClosing, SpokenTransition
+from backend.interview.models import Question, Evaluation, Feedback, Hint, EvaluationWithFeedback, SpokenClosing, SpokenTransition
 from dotenv import load_dotenv
 
 load_dotenv()

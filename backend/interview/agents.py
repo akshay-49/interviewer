@@ -1,8 +1,8 @@
 from typing import Optional
 from langchain_core.messages import SystemMessage, HumanMessage
-from backend.models import InterviewState, Evaluation
-from backend.llm import question_llm, evaluation_with_feedback_llm, hint_llm, closing_llm, transition_llm
-from backend.config import (
+from backend.interview.models import InterviewState, Evaluation
+from backend.core.llm import question_llm, evaluation_with_feedback_llm, hint_llm, closing_llm, transition_llm
+from backend.core.config import (
     MAX_QUESTIONS,
     WEAK_ANSWER_THRESHOLD,
     STRONG_ANSWER_THRESHOLD,

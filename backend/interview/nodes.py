@@ -1,7 +1,7 @@
 from typing import Dict
 from langgraph.types import interrupt
-from backend.models import InterviewState
-from backend.agents import (
+from backend.interview.models import InterviewState
+from backend.interview.agents import (
     ask_question_agent,
     evaluate_with_feedback_agent,
     decision_agent,
@@ -82,7 +82,7 @@ def evaluate_node(state: InterviewState) -> Dict:
 
     logger.info(f"Evaluation: score={score}, topic={topic}")
 
-    from backend.models import Evaluation
+    from backend.interview.models import Evaluation
     evaluation = Evaluation(
         score=score,
         topic=topic,

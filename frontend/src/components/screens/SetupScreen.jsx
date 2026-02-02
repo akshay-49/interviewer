@@ -109,6 +109,7 @@ const SetupScreen = () => {
                 sessionId: result.session_id,
                 currentQuestion: result.question,
                 questionNumber: 1,
+                totalQuestions: result.total_questions || 5,
                 role,
                 experience,
                 roleDescription: formData.jobDescription || '',
@@ -127,35 +128,9 @@ const SetupScreen = () => {
     };
 
     return (
-        <div className="bg-background-light dark:bg-background-dark text-[#121617] dark:text-[#f0f0f0] font-display min-h-screen flex flex-col">
-            {/* Header */}
-            <header className="w-full border-b border-[#ebefef] dark:border-gray-800 bg-white/50 dark:bg-[#22252a]/50 backdrop-blur-sm sticky top-0 z-10">
-                <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                        <img src="/accellor-logo.svg" alt="Accellor" className="h-8" />
-                    </div>
-                    <div className="flex items-center gap-4">
-                        <button
-                            onClick={toggleTheme}
-                            className="inline-flex items-center justify-center size-10 rounded-full border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/70 text-gray-700 dark:text-gray-200 shadow-sm hover:shadow transition-all"
-                            aria-label="Toggle color theme"
-                            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-                        >
-                            <span className="material-symbols-outlined text-lg">{theme === 'dark' ? 'light_mode' : 'dark_mode'}</span>
-                        </button>
-                        <div className="h-4 w-px bg-gray-200 dark:bg-gray-700"></div>
-                        <button
-                            onClick={() => navigateTo('welcome')}
-                            className="flex items-center gap-2 text-gray-600 dark:text-gray-300 hover:text-primary transition-colors"
-                        >
-                            <span className="material-symbols-outlined">arrow_back</span>
-                        </button>
-                    </div>
-                </div>
-            </header>
-
+        <div className="bg-background-light dark:bg-background-dark text-[#121617] dark:text-[#f0f0f0] font-display h-full flex flex-col overflow-hidden">
             {/* Main Content */}
-            <main className="flex-grow flex items-center justify-center p-2 sm:p-3 md:p-4 relative w-full">
+            <main className="flex-1 flex items-center justify-center p-2 sm:p-3 md:p-4 relative w-full overflow-hidden">
                 <div className="absolute top-1/4 left-1/4 w-64 sm:w-80 md:w-96 h-64 sm:h-80 md:h-96 bg-primary/5 rounded-full blur-3xl -z-10 animate-pulse"></div>
                 <div className="absolute bottom-1/4 right-1/4 w-56 sm:w-72 md:w-80 h-56 sm:h-72 md:h-80 bg-teal-200/10 dark:bg-teal-900/10 rounded-full blur-3xl -z-10 animate-pulse" style={{animationDelay: '1s'}}></div>
 

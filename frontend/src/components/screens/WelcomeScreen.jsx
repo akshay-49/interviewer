@@ -77,30 +77,7 @@ const WelcomeScreen = () => {
     };
 
     return (
-        <div className="bg-background-light dark:bg-background-dark font-display min-h-screen flex flex-col overflow-x-hidden transition-colors duration-300">
-            {/* Header */}
-            <header className="w-full border-b border-[#ebefef] dark:border-gray-800 bg-white/50 dark:bg-[#22252a]/50 backdrop-blur-sm sticky top-0 z-10">
-                <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                        <img src="/accellor-logo.svg" alt="Accellor" className="h-8" />
-                    </div>
-                    <div className="flex items-center gap-4">
-                        <button
-                            onClick={toggleTheme}
-                            className="inline-flex items-center justify-center size-10 rounded-full border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/70 text-gray-700 dark:text-gray-200 shadow-sm hover:shadow transition-all"
-                            aria-label="Toggle color theme"
-                            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-                        >
-                            <span className="material-symbols-outlined text-lg">{theme === 'dark' ? 'light_mode' : 'dark_mode'}</span>
-                        </button>
-                        <div className="h-4 w-px bg-gray-200 dark:bg-gray-700"></div>
-                        <span className="text-sm font-semibold text-gray-600 dark:text-gray-300">
-                            {backendAvailable ? '🟢 Connected' : '🔴 Offline'}
-                        </span>
-                    </div>
-                </div>
-            </header>
-
+        <div className="bg-background-light dark:bg-background-dark font-display h-full flex flex-col overflow-x-hidden transition-colors duration-300">
             {/* Main Content */}
             <main className="flex-grow flex items-center justify-center p-4 sm:p-6 md:p-10 relative w-full">
                 <div className="absolute top-1/4 left-1/4 w-64 sm:w-80 md:w-96 h-64 sm:h-80 md:h-96 bg-primary/5 rounded-full blur-3xl -z-10 animate-pulse"></div>
