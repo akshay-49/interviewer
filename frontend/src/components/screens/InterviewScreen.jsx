@@ -1,14 +1,14 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useInterview } from '../../context/InterviewContext';
-import { api, speakText } from '../../utils/api';
+import { api, speakText, playAudioFromBase64 } from '../../utils/api';
 import { createSpeechRecognizer } from '../../utils/azureSpeech';
 
 // Toggle test mode: set to true for testing with text input, false for production (mic only)
 const FOR_TEST = false;
 
 const InterviewScreen = () => {
-    const { interview, updateInterview, navigateTo, theme, toggleTheme } = useInterview();
-    const [panelState, setPanelState] = useState('speaking'); // 'speaking', 'listening', 'evaluating', 'skipping', 'coach-feedback'
+    const { interview, updateInterview, navigateTo, theme, toggleTheme, registerStopRecordingCallback } = useInterview();
+    const [panelState, setPanelState] = useState('loading'); // 'loading', 'speaking', 'listening', 'evaluating', 'skipping', 'coach-feedback'
     const [transcript, setTranscript] = useState('');
     const [endingSession, setEndingSession] = useState(false);
     const [hint, setHint] = useState(null);
@@ -23,41 +23,79 @@ const InterviewScreen = () => {
     const transcriptRef = useRef(''); // Store current transcript value for onend handler
     const userStoppedRef = useRef(false);
     const audioPlayedRef = useRef(false);
+    const panelStateRef = useRef(panelState);
+    const allowRecordingRef = useRef(false);
 
     // Speak question text when component mounts or when new question arrives
     useEffect(() => {
         if (interview.questionText && !interview.audioPlaying && !audioPlayedRef.current) {
-            console.log('Speaking question:', interview.questionNumber);
+            console.log('Starting to speak question:', interview.questionNumber);
             audioPlayedRef.current = true;
             updateInterview({ audioPlaying: true });
+            setPanelState('speaking');
+            
             speakText(interview.questionText)
                 .then(() => {
-                    console.log('Question speech finished');
+                    console.log('Question speech finished - now transitioning to listening');
                     updateInterview({ audioPlaying: false, questionText: null });
                     setPanelState('listening');
-                    startRecording();
+                    // Delay listening start by 1 second after question finishes
+                    setTimeout(() => startRecording(), 1000);
                 })
                 .catch((error) => {
                     console.warn('Failed to speak question:', error);
                     updateInterview({ audioPlaying: false });
                     setPanelState('listening');
-                    startRecording();
+                    // Delay listening start by 1 second even on error
+                    setTimeout(() => startRecording(), 1000);
                 });
         } else if (!interview.questionText && panelState === 'speaking' && !audioPlayedRef.current) {
-            // If no text to speak, go straight to listening
-            console.log('No question to speak, starting recording immediately');
+            // If no text to speak, go straight to listening with 1 second delay
+            console.log('No question to speak, starting recording after 1 second delay');
             audioPlayedRef.current = true;
             setPanelState('listening');
-            setTimeout(() => startRecording(), 500);
+            setTimeout(() => startRecording(), 1000);
         }
     }, [interview.questionText]);
 
+    const stopAllRecording = () => {
+        console.log('stopAllRecording called');
+        allowRecordingRef.current = false;
+        if (recognitionRef.current) {
+            try {
+                recognitionRef.current.stop();
+                console.log('Recognition stopped');
+            } catch (error) {
+                console.error('Error stopping recognition:', error);
+            }
+            recognitionRef.current = null;
+        }
+        setIsRecordingLocal(false);
+        updateInterview({ isRecording: false });
+    };
+
+    // Keep panelStateRef in sync with panelState
+    useEffect(() => {
+        panelStateRef.current = panelState;
+    }, [panelState]);
+
+    // Stop recording any time we leave listening state
+    useEffect(() => {
+        if (panelState !== 'listening') {
+            stopAllRecording();
+        }
+    }, [panelState]);
+
     // Cleanup: stop recording when component unmounts
     useEffect(() => {
+        // Register the callback to stop recording when navigating away
+        registerStopRecordingCallback(() => {
+            stopAllRecording();
+        });
+
         return () => {
-            if (recognitionRef.current) {
-                recognitionRef.current.stop();
-            }
+            console.log('InterviewScreen unmounting, stopping recording');
+            stopAllRecording();
         };
     }, []);
 
@@ -67,7 +105,7 @@ const InterviewScreen = () => {
     }, [transcript]);
 
     const startRecording = () => {
-        console.log('startRecording called, isRecordingLocal:', isRecordingLocal, 'recognitionRef:', recognitionRef.current);
+        console.log('startRecording called, isRecordingLocal:', isRecordingLocal, 'panelState:', panelState, 'recognitionRef:', recognitionRef.current);
         
         // Prevent starting if already recording and recognition ref exists
         if (isRecordingLocal && recognitionRef.current) {
@@ -76,6 +114,7 @@ const InterviewScreen = () => {
         }
         
         try {
+            allowRecordingRef.current = true;
             const recognition = createSpeechRecognizer();
             
             finalTranscriptRef.current = '';
@@ -118,7 +157,7 @@ const InterviewScreen = () => {
                     alert('Speech recognition error: ' + event.error);
                 }
                 updateInterview({ isRecording: false });
-                setPanelState('listening'); // Stay in listening state
+                // Don't change panel state - stay where we were
             };
 
 
@@ -128,6 +167,11 @@ const InterviewScreen = () => {
                 console.log('Transcript ref:', transcriptRef.current);
                 
                 setIsRecordingLocal(false);
+
+                if (!allowRecordingRef.current) {
+                    updateInterview({ isRecording: false });
+                    return;
+                }
                 
                 // Only submit if user manually stopped
                 if (userStoppedRef.current) {
@@ -143,7 +187,7 @@ const InterviewScreen = () => {
                 } else {
                     // Recognition ended unexpectedly (silence, etc), restart it
                     console.log('Recognition ended unexpectedly, restarting...');
-                    if (panelState === 'listening') {
+                    if (panelStateRef.current === 'listening') {
                         // Need to reinitialize and restart since stopped object can't be restarted
                         try {
                             startRecording();
@@ -194,11 +238,20 @@ const InterviewScreen = () => {
             console.log('Hints used updated:', newHintsUsed);
             updateInterview({ hintsUsed: newHintsUsed });
             if (result.audio) {
-                await playAudioFromBase64(result.audio);
+                try {
+                    await playAudioFromBase64(result.audio);
+                } catch (audioError) {
+                    console.warn('Hint audio playback failed, falling back to TTS:', audioError);
+                    if (result.hint) {
+                        await speakText(result.hint);
+                    }
+                }
                 // Ensure recognition is still active after hint audio finishes
                 if (recognitionRef.current && panelState === 'listening') {
                     console.log('Hint audio finished, recognition still active');
                 }
+            } else if (result.hint) {
+                await speakText(result.hint);
             }
         } catch (error) {
             console.error('Failed to get hint:', error);
@@ -522,44 +575,7 @@ const InterviewScreen = () => {
     };
 
     return (
-        <div className="bg-background-light dark:bg-background-dark text-[#121617] dark:text-[#f0f0f0] font-display min-h-screen flex flex-col transition-colors duration-300">
-            {/* Header */}
-            <header className="w-full border-b border-[#ebefef] dark:border-gray-800 bg-white/50 dark:bg-[#22252a]/50 backdrop-blur-sm sticky top-0 z-10">
-                <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-                    <button onClick={handleLogoClick} className="flex items-center gap-4 hover:opacity-70 transition-opacity cursor-pointer">
-                        <img src="/accellor-logo.svg" alt="Accellor" className="h-8" />
-                    </button>
-                    <div className="hidden md:flex items-center gap-4">
-                        <button
-                            onClick={toggleTheme}
-                            className="inline-flex items-center justify-center size-10 rounded-full border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/70 text-gray-700 dark:text-gray-200 shadow-sm hover:shadow transition-all"
-                            aria-label="Toggle color theme"
-                            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-                        >
-                            <span className="material-symbols-outlined text-lg">{theme === 'dark' ? 'light_mode' : 'dark_mode'}</span>
-                        </button>
-                        <div className="h-4 w-px bg-gray-200 dark:bg-gray-700"></div>
-                        <span className="text-sm font-medium text-gray-500 dark:text-gray-400">
-                            {interview.roleDisplay}
-                        </span>
-                        <div className="h-4 w-px bg-gray-200 dark:bg-gray-700"></div>
-                        <button 
-                            onClick={endSession} 
-                            disabled={endingSession}
-                            className="text-sm font-bold text-gray-600 dark:text-gray-300 hover:text-red-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                        >
-                            {endingSession && (
-                                <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                </svg>
-                            )}
-                            {endingSession ? 'Ending Session...' : 'End Session'}
-                        </button>
-                    </div>
-                </div>
-            </header>
-
+        <div className="bg-background-light dark:bg-background-dark text-[#121617] dark:text-[#f0f0f0] font-display h-full flex flex-col transition-colors duration-300">
             {/* Main Content */}
             <main className="flex-grow flex flex-col items-center justify-center p-6 sm:p-10 relative">
                 {panelState === 'coach-feedback' && (
@@ -636,7 +652,9 @@ const InterviewScreen = () => {
                                 <span className="text-primary font-bold text-xs uppercase tracking-wider">
                                     Q{interview.questionNumber}/{interview.totalQuestions}
                                 </span>
-                                <span className="text-gray-400 dark:text-gray-500 text-xs font-semibold">Technical</span>
+                                <span className="text-gray-400 dark:text-gray-500 text-xs font-semibold">
+                                    {interview.roleDisplay || 'Technical'}
+                                </span>
                             </div>
                             <div className="h-1 w-full bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
                                 <div className="h-full bg-primary rounded-full transition-all duration-500" style={{width: `${progressPercentage}%`}}></div>
@@ -646,7 +664,9 @@ const InterviewScreen = () => {
                         {/* The Question */}
                         <div className="flex-grow flex flex-col justify-center min-h-0 overflow-y-auto">
                             <h1 className="text-lg md:text-xl lg:text-2xl font-bold leading-snug tracking-tight text-gray-900 dark:text-gray-50 overflow-y-auto max-h-[300px] pr-2">
-                                {panelState === 'generating' ? 'Generating next question...' : interview.currentQuestion}
+                                {panelState === 'generating'
+                                    ? (isLoadingResults ? 'Loading results...' : 'Generating next question...')
+                                    : interview.currentQuestion}
                             </h1>
                             <p className="mt-3 text-gray-500 dark:text-gray-400 text-sm md:text-base leading-relaxed">
                                 {transcript || (panelState === 'listening' ? 'Start speaking...' : '')}

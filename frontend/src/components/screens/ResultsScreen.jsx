@@ -177,32 +177,9 @@ const ResultsScreen = () => {
     };
 
     return (
-        <div className="bg-background-light dark:bg-background-dark font-display min-h-screen flex flex-col">
-            {/* Header */}
-            <header className="sticky top-0 z-50 w-full border-b border-[#ebefef] dark:border-gray-800 bg-white/80 dark:bg-[#22252a]/80 backdrop-blur-md">
-                <div className="px-6 md:px-10 py-4 flex items-center justify-between max-w-[1400px] mx-auto">
-                    <div className="flex items-center gap-4 text-primary dark:text-white">
-                        <img src="/accellor-logo.svg" alt="Accellor" className="h-8" />
-                    </div>
-                    <div className="flex items-center gap-4">
-                        <button
-                            onClick={toggleTheme}
-                            className="inline-flex items-center justify-center size-10 rounded-full border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-gray-900/70 text-gray-700 dark:text-gray-200 shadow-sm hover:shadow transition-all"
-                            aria-label="Toggle color theme"
-                            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-                        >
-                            <span className="material-symbols-outlined text-lg">{theme === 'dark' ? 'light_mode' : 'dark_mode'}</span>
-                        </button>
-                        <div className="h-4 w-px bg-gray-200 dark:bg-gray-700"></div>
-                        <button onClick={() => navigateTo('welcome')} className="px-4 py-2 text-sm font-bold text-primary hover:bg-primary/10 rounded-lg transition-colors">
-                            Home
-                        </button>
-                    </div>
-                </div>
-            </header>
-
+        <div className="bg-background-light dark:bg-background-dark font-display h-full flex flex-col overflow-hidden">
             {/* Main */}
-            <main className="flex-grow flex flex-col items-center justify-center p-3 md:p-6 max-w-7xl mx-auto w-full overflow-y-auto" ref={contentRef}>
+            <main className="flex-1 flex flex-col items-center justify-start p-3 md:p-6 max-w-7xl mx-auto w-full overflow-y-auto" ref={contentRef}>
                 {/* Intro */}
                 <div className="flex flex-col items-center w-full max-w-2xl text-center mb-6">
                     <div className="mb-3 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/5 dark:bg-primary/20 border border-primary/10 dark:border-primary/30">

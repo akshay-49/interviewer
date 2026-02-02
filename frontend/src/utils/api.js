@@ -1,5 +1,9 @@
+import { stopSpeechPlayback } from './azureSpeech';
+
 // API Client for Backend Communication
 const API_BASE_URL = 'http://localhost:8000';
+
+let currentBase64Audio = null;
 
 export const api = {
     // Start a new interview session
@@ -151,9 +155,54 @@ export async function speakText(text) {
     }
 }
 
-// Legacy function kept for backward compatibility (now uses Azure TTS)
+// Play base64 audio returned by backend (hint audio, etc.)
 export function playAudioFromBase64(base64Audio) {
-    console.warn('playAudioFromBase64 is deprecated. Audio is now synthesized directly in frontend.');
-    return Promise.resolve();
+    return new Promise((resolve, reject) => {
+        try {
+            const tryPlay = (src) => {
+                const audio = new Audio(src);
+                currentBase64Audio = audio;
+                audio.onended = () => resolve();
+                audio.onerror = (e) => reject(e);
+                audio.play().catch(reject);
+            };
+
+            if (base64Audio.startsWith('data:')) {
+                tryPlay(base64Audio);
+                return;
+            }
+
+            // Try wav first, then mp3 if it fails
+            const wavSrc = `data:audio/wav;base64,${base64Audio}`;
+            const mp3Src = `data:audio/mpeg;base64,${base64Audio}`;
+
+            const audio = new Audio(wavSrc);
+            currentBase64Audio = audio;
+            audio.onended = () => resolve();
+            audio.onerror = () => {
+                tryPlay(mp3Src);
+            };
+            audio.play().catch(() => {
+                tryPlay(mp3Src);
+            });
+        } catch (error) {
+            console.error('Failed to play base64 audio:', error);
+            reject(error);
+        }
+    });
+}
+
+// Stop any currently playing audio (base64 or Azure TTS)
+export function stopAudioPlayback() {
+    if (currentBase64Audio) {
+        try {
+            currentBase64Audio.pause();
+            currentBase64Audio.currentTime = 0;
+        } catch (e) {
+            console.warn('Error stopping base64 audio:', e);
+        }
+        currentBase64Audio = null;
+    }
+    stopSpeechPlayback();
 }
 

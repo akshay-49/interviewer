@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { api } from '../utils/api';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import { api, stopAudioPlayback } from '../utils/api';
 
 const InterviewContext = createContext();
 
@@ -12,8 +12,9 @@ export const useInterview = () => {
 };
 
 export const InterviewProvider = ({ children }) => {
-    const [currentScreen, setCurrentScreen] = useState('welcome');
+    const [currentScreen, setCurrentScreen] = useState('login');
     const [backendAvailable, setBackendAvailable] = useState(false);
+    const stopRecordingCallbackRef = useRef(null);
 
     // Theme selection (light/dark) with system + localStorage preference
     const getPreferredTheme = () => {
@@ -24,6 +25,13 @@ export const InterviewProvider = ({ children }) => {
     };
 
     const [theme, setTheme] = useState(getPreferredTheme);
+
+    // User state (for profile, login, etc.)
+    const [user, setUser] = useState({
+        name: 'Guest User',
+        email: null,
+        isLoggedIn: false,
+    });
 
     useEffect(() => {
         const root = document.documentElement;
@@ -65,8 +73,31 @@ export const InterviewProvider = ({ children }) => {
         checkBackend();
     }, []);
 
+    // Browser back/forward button support
+    useEffect(() => {
+        const handlePopState = (event) => {
+            const screen = event.state?.screen || 'login';
+            stopAudioPlayback();
+            setCurrentScreen(screen);
+        };
+
+        window.addEventListener('popstate', handlePopState);
+        return () => window.removeEventListener('popstate', handlePopState);
+    }, []);
+
+    // Push state to history when currentScreen changes
+    useEffect(() => {
+        const state = { screen: currentScreen };
+        const title = currentScreen.charAt(0).toUpperCase() + currentScreen.slice(1);
+        window.history.pushState(state, title);
+    }, [currentScreen]);
+
     const updateInterview = (updates) => {
         setInterview(prev => ({ ...prev, ...updates }));
+    };
+
+    const updateUser = (updates) => {
+        setUser(prev => ({ ...prev, ...updates }));
     };
 
     const resetInterview = () => {
@@ -96,8 +127,27 @@ export const InterviewProvider = ({ children }) => {
         setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
     };
 
-    const navigateTo = (screen) => {
+    const navigateTo = (screen, replaceHistory = false) => {
+        // Stop recording if we're leaving the interview screen
+        if (screen !== 'interview' && stopRecordingCallbackRef.current) {
+            console.log('Navigating away from interview, stopping recording');
+            stopRecordingCallbackRef.current();
+        }
+
+        stopAudioPlayback();
+        
         setCurrentScreen(screen);
+        
+        const state = { screen };
+        const title = screen.charAt(0).toUpperCase() + screen.slice(1);
+        
+        if (replaceHistory) {
+            window.history.replaceState(state, title);
+        }
+    };
+
+    const registerStopRecordingCallback = (callback) => {
+        stopRecordingCallbackRef.current = callback;
     };
 
     const value = {
@@ -110,6 +160,9 @@ export const InterviewProvider = ({ children }) => {
         setInterview,
         theme,
         toggleTheme,
+        user,
+        updateUser,
+        registerStopRecordingCallback,
     };
 
     return (
