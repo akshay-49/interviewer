@@ -1,18 +1,80 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useInterview } from '../../context/InterviewContext';
+import { useAuth0 } from '@auth0/auth0-react';
+import QuestionBankScreen from './QuestionBankScreen';
 
 const AdminDashboardScreen = () => {
-    const { navigateTo } = useInterview();
+    const { navigateTo, user, updateUser, resetInterview } = useInterview();
+    const { logout } = useAuth0();
     const [activeTab, setActiveTab] = useState('overview');
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
     const [users, setUsers] = useState([]);
     const [usersLoading, setUsersLoading] = useState(true);
     const [usersError, setUsersError] = useState('');
+    const [analytics, setAnalytics] = useState(null);
+    const [analyticsLoading, setAnalyticsLoading] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [userFilter, setUserFilter] = useState('all');
+    const [selectedUser, setSelectedUser] = useState(null);
+    const [showUserMenu, setShowUserMenu] = useState(null);
+    const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
+    const [isProfileOpen, setIsProfileOpen] = useState(false);
+    const profileMenuRef = useRef(null);
+
+    const displayName = user?.name || 'Admin User';
+    const initials = displayName
+        .split(' ')
+        .map(word => word[0])
+        .join('')
+        .toUpperCase()
+        .slice(0, 2);
+
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (profileMenuRef.current && !profileMenuRef.current.contains(event.target)) {
+                setIsProfileOpen(false);
+            }
+        };
+
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    const handleLogout = () => {
+        setIsProfileOpen(false);
+        updateUser({
+            name: 'Guest User',
+            email: null,
+            isLoggedIn: false,
+            isAdmin: false,
+            picture: null,
+        });
+        resetInterview();
+        logout({
+            logoutParams: {
+                returnTo: window.location.origin,
+            },
+        });
+    };
 
     const loadUsers = async (signal) => {
         setUsersLoading(true);
         setUsersError('');
         try {
+            // Try Cosmos DB endpoint first (no auth required for testing)
+            const cosmosResponse = await fetch('http://localhost:8000/admin/users-cosmos', {
+                signal,
+            });
+
+            if (cosmosResponse.ok) {
+                const data = await cosmosResponse.json();
+                console.log('Loaded users from Cosmos DB:', data);
+                setUsers(data.users || []);
+                setUsersLoading(false);
+                return;
+            }
+
+            // Fallback to auth endpoint
             const token = localStorage.getItem('access_token');
             const response = await fetch('http://localhost:8000/auth/admin/users', {
                 headers: {
@@ -23,17 +85,58 @@ const AdminDashboardScreen = () => {
             });
 
             if (!response.ok) {
-                throw new Error('Failed to load users');
+                throw new Error('Failed to load users from both endpoints');
             }
 
             const data = await response.json();
             setUsers(data.users || []);
         } catch (err) {
             if (err.name !== 'AbortError') {
+                console.error('Load users error:', err);
                 setUsersError(err.message || 'Failed to load users');
             }
         } finally {
             setUsersLoading(false);
+        }
+    };
+
+    const loadAnalytics = async () => {
+        setAnalyticsLoading(true);
+        try {
+            // Fetch analytics from backend - using historyApi to get all sessions
+            const allSessions = [];
+            for (const user of users) {
+                try {
+                    const response = await fetch('http://localhost:8000/session/user-history', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ user_id: user.id })
+                    });
+                    if (response.ok) {
+                        const sessions = await response.json();
+                        allSessions.push(...sessions);
+                    }
+                } catch (err) {
+                    console.error(`Failed to load sessions for user ${user.id}:`, err);
+                }
+            }
+            
+            // Calculate analytics
+            const now = new Date();
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            const todaySessions = allSessions.filter(s => new Date(s.completed_at) >= today);
+            const avgScore = allSessions.length > 0 ? allSessions.reduce((sum, s) => sum + (s.overall_score || 0), 0) / allSessions.length : 0;
+            
+            setAnalytics({
+                totalSessions: allSessions.length,
+                todaySessions: todaySessions.length,
+                averageScore: avgScore.toFixed(1),
+                activeSessions: 0 // Would need WebSocket or polling for real-time data
+            });
+        } catch (err) {
+            console.error('Failed to load analytics:', err);
+        } finally {
+            setAnalyticsLoading(false);
         }
     };
 
@@ -43,6 +146,12 @@ const AdminDashboardScreen = () => {
         return () => controller.abort();
     }, []);
 
+    useEffect(() => {
+        if (users.length > 0 && !analytics) {
+            loadAnalytics();
+        }
+    }, [users]);
+
     const getInitials = (name) => {
         if (!name) return '??';
         const parts = name.split(' ');
@@ -51,8 +160,94 @@ const AdminDashboardScreen = () => {
 
     const formatDate = (dateString) => {
         if (!dateString) return 'N/A';
-        const date = new Date(dateString);
-        return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        try {
+            const date = new Date(dateString);
+            if (isNaN(date.getTime())) return 'N/A';
+            return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+        } catch {
+            return 'N/A';
+        }
+    };
+
+    const filteredUsers = users.filter(user => {
+        // Search filter
+        const matchesSearch = !searchQuery || 
+            user.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            user.email?.toLowerCase().includes(searchQuery.toLowerCase());
+        
+        // Role filter
+        const matchesFilter = 
+            userFilter === 'all' ||
+            (userFilter === 'admins' && user.is_admin) ||
+            (userFilter === 'users' && !user.is_admin) ||
+            (userFilter === 'active' && user.is_active) ||
+            (userFilter === 'inactive' && !user.is_active);
+        
+        return matchesSearch && matchesFilter;
+    });
+
+    const handleExportReport = () => {
+        const csvContent = [
+            ['Name', 'Email', 'Provider', 'Joined', 'Status', 'Role'].join(','),
+            ...users.map(u => [
+                u.full_name || '',
+                u.email || '',
+                u.auth_provider || 'local',
+                formatDate(u.created_at),
+                u.is_active ? 'Active' : 'Inactive',
+                u.is_admin ? 'Admin' : 'User'
+            ].join(','))
+        ].join('\n');
+        
+        const blob = new Blob([csvContent], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `users-report-${new Date().toISOString().split('T')[0]}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
+    const toggleUserAdmin = async (userId, currentIsAdmin) => {
+        try {
+            const response = await fetch('http://localhost:8000/admin/update-user-admin', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId, is_admin: !currentIsAdmin })
+            });
+            
+            if (response.ok) {
+                // Reload users to get updated data
+                await loadUsers();
+                alert(`Successfully ${!currentIsAdmin ? 'granted' : 'removed'} admin access`);
+            } else {
+                alert('Failed to update admin status');
+            }
+        } catch (err) {
+            console.error('Error toggling admin:', err);
+            alert('Failed to update admin status');
+        }
+    };
+
+    const toggleUserActive = async (userId, currentIsActive) => {
+        try {
+            const response = await fetch('http://localhost:8000/admin/update-user-active', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: userId, is_active: !currentIsActive })
+            });
+            
+            if (response.ok) {
+                // Reload users to get updated data
+                await loadUsers();
+                alert(`Successfully ${!currentIsActive ? 'activated' : 'deactivated'} user`);
+            } else {
+                alert('Failed to update active status');
+            }
+        } catch (err) {
+            console.error('Error toggling active:', err);
+            alert('Failed to update active status');
+        }
     };
 
     return (
@@ -61,11 +256,16 @@ const AdminDashboardScreen = () => {
             <header className="sticky top-0 z-50 w-full border-b border-[#e7f1f3] bg-white px-4 md:px-10 py-3 shadow-sm">
                 <div className="max-w-[1600px] mx-auto flex items-center justify-between whitespace-nowrap">
                     <div className="flex items-center gap-8">
-                        <div className="flex items-center gap-3">
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('overview')}
+                            className="flex items-center gap-3 focus:outline-none"
+                            aria-label="Go to dashboard"
+                        >
                             <img src="/accellor-logo.svg" alt="Accellor" className="h-8"/>
                             <div className="h-6 w-px bg-[#e7f1f3]"></div>
                             <h2 className="text-[#0d191b] text-lg font-bold">Admin Portal</h2>
-                        </div>
+                        </button>
                         <nav className="hidden md:flex items-center gap-6">
                             <button 
                                 onClick={() => setActiveTab('overview')}
@@ -78,6 +278,12 @@ const AdminDashboardScreen = () => {
                                 className={`text-sm font-semibold transition-colors ${activeTab === 'users' ? 'text-primary font-bold' : 'text-[#4c8e9a] hover:text-primary'}`}
                             >
                                 Users
+                            </button>
+                            <button 
+                                onClick={() => setActiveTab('questions')}
+                                className={`text-sm font-semibold transition-colors ${activeTab === 'questions' ? 'text-primary font-bold' : 'text-[#4c8e9a] hover:text-primary'}`}
+                            >
+                                Questions
                             </button>
                             <button 
                                 onClick={() => setActiveTab('analytics')}
@@ -94,24 +300,39 @@ const AdminDashboardScreen = () => {
                         </nav>
                     </div>
                     <div className="flex items-center gap-6">
-                        <div className="hidden lg:block">
-                            <label className="relative flex items-center w-64 h-10">
-                                <span className="absolute left-3 text-[#4c8e9a] material-symbols-outlined text-[20px]">search</span>
-                                <input 
-                                    className="w-full h-full pl-10 pr-4 rounded-lg border-none bg-[#e7f1f3] text-[#0d191b] placeholder:text-[#4c8e9a] text-sm focus:ring-2 focus:ring-primary" 
-                                    placeholder="Search users, sessions..." 
-                                    type="text"
-                                />
-                            </label>
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <button className="p-2 text-[#4c8e9a] hover:bg-[#e7f1f3] rounded-full transition-all">
-                                <span className="material-symbols-outlined">notifications</span>
+                        <div ref={profileMenuRef} className="relative">
+                            <button
+                                type="button"
+                                onClick={() => setIsProfileOpen(!isProfileOpen)}
+                                className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[#e7f1f3] transition-colors"
+                                aria-label="Profile menu"
+                            >
+                                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-sm font-semibold">
+                                    {initials}
+                                </div>
+                                <span className="hidden md:block text-sm font-medium text-[#0d191b]">
+                                    {displayName}
+                                </span>
+                                <span className={`material-symbols-outlined text-[20px] text-[#4c8e9a] transition-transform ${isProfileOpen ? 'rotate-180' : ''}`}>
+                                    expand_more
+                                </span>
                             </button>
-                            <div 
-                                className="size-10 rounded-full bg-cover bg-center border-2 border-primary/20" 
-                                style={{backgroundImage: 'url("https://lh3.googleusercontent.com/aida-public/AB6AXuDTC4ZpPhiK_8GYbt5ZXQ2pbqRyLvqnoEpQLGewX7qSLE5aR2jT9_mwEvuq8vrkp9N8gERgzWNE9dcSHnZ-TZgu97z8xT3kuceUnH1K_PBEGH8AecP8MQZv5yM4LhLYZT0DM470gzH1vPLfjxP5otS-fE2gKnsL2DEKZpBPsJifazeBM7_YnDV6-6h6pREwptbiDfLuz90GOSzfAUzJGVou2T2I-vhxwZ8804TK3OD7WlwmNaPBhrCSQ-sg1b6tZM72xgXfnQbXkon7")'}}
-                            ></div>
+
+                            {isProfileOpen && (
+                                <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
+                                    <div className="px-4 py-2 border-b border-gray-200">
+                                        <p className="text-xs text-gray-500">Signed in as</p>
+                                        <p className="text-sm font-medium text-gray-900 truncate">{displayName}</p>
+                                    </div>
+                                    <button
+                                        onClick={handleLogout}
+                                        className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2"
+                                    >
+                                        <span className="material-symbols-outlined text-[18px]">logout</span>
+                                        Logout
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -132,7 +353,10 @@ const AdminDashboardScreen = () => {
                                     <span className="material-symbols-outlined text-[18px]">calendar_today</span>
                                     Last 30 Days
                                 </button>
-                                <button className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary text-white text-sm font-bold hover:shadow-lg hover:shadow-primary/30 transition-all">
+                                <button 
+                                    onClick={handleExportReport}
+                                    className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary text-white text-sm font-bold hover:shadow-lg hover:shadow-primary/30 transition-all"
+                                >
                                     <span className="material-symbols-outlined text-[18px]">download</span>
                                     Export Report
                                 </button>
@@ -147,21 +371,21 @@ const AdminDashboardScreen = () => {
                                 <p className="text-xs text-emerald-600 font-semibold mt-1">+12% this month</p>
                             </div>
                             <div className="bg-white p-5 rounded-xl border border-[#e7f1f3] shadow-sm hover:shadow-md transition-shadow">
-                                <p className="text-[#4c8e9a] text-xs font-bold uppercase tracking-wider">Active Sessions</p>
-                                <h3 className="text-3xl font-black mt-2 text-primary">24</h3>
-                                <p className="text-xs text-[#4c8e9a] font-semibold mt-1">Live now</p>
+                                <p className="text-[#4c8e9a] text-xs font-bold uppercase tracking-wider">Total Sessions</p>
+                                <h3 className="text-3xl font-black mt-2 text-primary">{analyticsLoading ? '...' : (analytics?.totalSessions || 0)}</h3>
+                                <p className="text-xs text-[#4c8e9a] font-semibold mt-1">All time</p>
                             </div>
                             <div className="bg-white p-5 rounded-xl border border-[#e7f1f3] shadow-sm hover:shadow-md transition-shadow">
                                 <p className="text-[#4c8e9a] text-xs font-bold uppercase tracking-wider">Interviews Today</p>
-                                <h3 className="text-3xl font-black mt-2 text-[#0d191b]">156</h3>
-                                <p className="text-xs text-emerald-600 font-semibold mt-1">+8% vs yesterday</p>
+                                <h3 className="text-3xl font-black mt-2 text-[#0d191b]">{analyticsLoading ? '...' : (analytics?.todaySessions || 0)}</h3>
+                                <p className="text-xs text-emerald-600 font-semibold mt-1">Completed</p>
                             </div>
                             <div className="bg-white p-5 rounded-xl border border-[#e7f1f3] shadow-sm hover:shadow-md transition-shadow">
-                                <p className="text-[#4c8e9a] text-xs font-bold uppercase tracking-wider">System Health</p>
-                                <h3 className="text-3xl font-black mt-2 text-green-500">99.9%</h3>
+                                <p className="text-[#4c8e9a] text-xs font-bold uppercase tracking-wider">Avg Score</p>
+                                <h3 className="text-3xl font-black mt-2 text-green-500">{analyticsLoading ? '...' : (analytics?.averageScore || '0')}/10</h3>
                                 <div className="flex items-center gap-1.5 mt-1">
                                     <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                                    <span className="text-xs text-green-600 font-bold uppercase">Operational</span>
+                                    <span className="text-xs text-green-600 font-bold uppercase">Platform Average</span>
                                 </div>
                             </div>
                         </div>
@@ -212,10 +436,20 @@ const AdminDashboardScreen = () => {
                                 <p className="text-[#4c8e9a] text-base font-normal">Manage user accounts and permissions.</p>
                             </div>
                             <div className="flex gap-3">
-                                <button className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#e7f1f3] text-[#0d191b] text-sm font-bold hover:bg-[#d8e8eb] transition-all">
-                                    <span className="material-symbols-outlined text-[18px]">filter_list</span>
-                                    Filter
-                                </button>
+                                <div className="relative">
+                                    <select
+                                        value={userFilter}
+                                        onChange={(e) => setUserFilter(e.target.value)}
+                                        className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#e7f1f3] text-[#0d191b] text-sm font-bold hover:bg-[#d8e8eb] transition-all appearance-none pr-10 cursor-pointer"
+                                    >
+                                        <option value="all">All Users</option>
+                                        <option value="admins">Admins Only</option>
+                                        <option value="users">Users Only</option>
+                                        <option value="active">Active Only</option>
+                                        <option value="inactive">Inactive Only</option>
+                                    </select>
+                                    <span className="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-[18px] pointer-events-none">filter_list</span>
+                                </div>
                                 <button 
                                     onClick={() => navigateTo('invite-candidate')}
                                     className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary text-white text-sm font-bold hover:shadow-lg hover:shadow-primary/30 transition-all"
@@ -243,7 +477,7 @@ const AdminDashboardScreen = () => {
                         </div>
 
                         {/* Users Table */}
-                        <div className="bg-white rounded-xl border border-[#e7f1f3] overflow-hidden shadow-sm">
+                        <div className="bg-white rounded-xl border border-[#e7f1f3] shadow-sm">
                             <div className="p-6 border-b border-[#e7f1f3] flex flex-col sm:flex-row justify-between items-center gap-4">
                                 <h3 className="text-lg font-bold">All Users</h3>
                                 <div className="flex gap-2">
@@ -285,7 +519,7 @@ const AdminDashboardScreen = () => {
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-[#e7f1f3]">
-                                                {users.map((user) => (
+                                                {filteredUsers.map((user) => (
                                                     <tr key={user.id} className="hover:bg-primary/5 transition-colors group">
                                                         <td className="px-6 py-4">
                                                             <div className="flex items-center gap-3">
@@ -317,7 +551,27 @@ const AdminDashboardScreen = () => {
                                                             </span>
                                                         </td>
                                                         <td className="px-6 py-4 text-right">
-                                                            <button className="p-2 text-[#4c8e9a] hover:text-primary hover:bg-primary/5 rounded-lg transition-colors">
+                                                            <button 
+                                                                onClick={(e) => {
+                                                                    if (showUserMenu === user.id) {
+                                                                        setShowUserMenu(null);
+                                                                    } else {
+                                                                        const rect = e.currentTarget.getBoundingClientRect();
+                                                                        const dropdownHeight = 200; // approximate height of 3 buttons
+                                                                        const bottomSpace = window.innerHeight - rect.bottom;
+                                                                        
+                                                                        // Position above if not enough space below
+                                                                        const top = bottomSpace < dropdownHeight ? rect.top - dropdownHeight - 8 : rect.bottom + 8;
+                                                                        
+                                                                        setMenuPosition({
+                                                                            top: top,
+                                                                            left: rect.left - 200
+                                                                        });
+                                                                        setShowUserMenu(user.id);
+                                                                    }
+                                                                }}
+                                                                className="p-2 text-[#4c8e9a] hover:text-primary hover:bg-primary/5 rounded-lg transition-colors"
+                                                            >
                                                                 <span className="material-symbols-outlined text-[20px]">more_vert</span>
                                                             </button>
                                                         </td>
@@ -327,12 +581,65 @@ const AdminDashboardScreen = () => {
                                         </table>
                                     </div>
                                     <div className="px-6 py-4 bg-[#f8fbfc] flex items-center justify-between">
-                                        <p className="text-xs text-[#4c8e9a] font-semibold">Showing {users.length} users</p>
+                                        <p className="text-xs text-[#4c8e9a] font-semibold">Showing {filteredUsers.length} of {users.length} users</p>
+                                    </div>
+                                </>
+                            )}
+                            
+                            {/* User Menu Portal */}
+                            {showUserMenu && (
+                                <>
+                                    <div className="fixed inset-0 z-40" onClick={() => setShowUserMenu(null)}></div>
+                                    <div className="fixed bg-white border border-[#e7f1f3] rounded-lg shadow-2xl z-50 w-48" style={{
+                                        top: `${menuPosition.top}px`,
+                                        left: `${menuPosition.left}px`,
+                                        maxHeight: '400px',
+                                        overflowY: 'auto'
+                                    }}>
+                                        {(() => {
+                                            const selectedUserObj = users.find(u => u.id === showUserMenu);
+                                            return selectedUserObj ? (
+                                                <>
+                                                    <button
+                                                        onClick={() => {
+                                                            toggleUserAdmin(selectedUserObj.id, selectedUserObj.is_admin);
+                                                            setShowUserMenu(null);
+                                                        }}
+                                                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-[#f8fbfc] first:rounded-t-lg"
+                                                    >
+                                                        {selectedUserObj.is_admin ? 'Remove Admin' : 'Make Admin'}
+                                                    </button>
+                                                    <button
+                                                        onClick={() => {
+                                                            toggleUserActive(selectedUserObj.id, selectedUserObj.is_active);
+                                                            setShowUserMenu(null);
+                                                        }}
+                                                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-[#f8fbfc] border-t border-[#e7f1f3]"
+                                                    >
+                                                        {selectedUserObj.is_active ? 'Deactivate' : 'Activate'}
+                                                    </button>
+                                                    <button
+                                                        onClick={() => {
+                                                            navigateTo('user-sessions', { userId: selectedUserObj.id });
+                                                            setShowUserMenu(null);
+                                                        }}
+                                                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-[#f8fbfc] border-t border-[#e7f1f3] last:rounded-b-lg"
+                                                    >
+                                                        View Sessions
+                                                    </button>
+                                                </>
+                                            ) : null;
+                                        })()}
                                     </div>
                                 </>
                             )}
                         </div>
                     </>
+                )}
+
+                {/* Questions Tab */}
+                {activeTab === 'questions' && (
+                    <QuestionBankScreen />
                 )}
 
                 {/* Coming Soon for other tabs */}

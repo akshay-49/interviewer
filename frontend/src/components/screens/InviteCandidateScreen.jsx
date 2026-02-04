@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useInterview } from '../../context/InterviewContext';
 
 const InviteCandidateScreen = () => {
@@ -6,77 +6,91 @@ const InviteCandidateScreen = () => {
     const [formData, setFormData] = useState({
         fullName: '',
         email: '',
-        seniorityLevel: 'Senior',
-        interviewType: 'video',
+        role: '',
+        seniorityLevel: '',
         jobDescription: ''
     });
     const [showSuccessToast, setShowSuccessToast] = useState(false);
-    const [invitations, setInvitations] = useState([
-        {
-            id: 1,
-            name: 'Alex Bennett',
-            email: 'alex.b@outlook.com',
-            role: 'Senior Frontend Eng.',
-            level: 'Senior',
-            dateSent: 'Oct 24, 2023',
-            time: '10:45 AM',
-            status: 'Pending',
-            accessEnabled: true
-        },
-        {
-            id: 2,
-            name: 'Maria Silva',
-            email: 'm.silva@tech.com',
-            role: 'Product Designer',
-            level: 'Lead',
-            dateSent: 'Oct 23, 2023',
-            time: '02:15 PM',
-            status: 'Completed',
-            accessEnabled: false
-        },
-        {
-            id: 3,
-            name: 'James Lee',
-            email: 'james@startup.io',
-            role: 'Data Analyst',
-            level: 'Junior',
-            dateSent: 'Oct 22, 2023',
-            time: '09:00 AM',
-            status: 'Invited',
-            accessEnabled: true
-        },
-        {
-            id: 4,
-            name: 'Kevin Thompson',
-            email: 'kevin@agency.com',
-            role: 'Fullstack Dev',
-            level: 'Middle',
-            dateSent: 'Oct 22, 2023',
-            time: '11:20 AM',
-            status: 'Invited',
-            accessEnabled: true
+    const [invitations, setInvitations] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [stats, setStats] = useState({
+        totalSent: 0,
+        pending: 0,
+        activeLinks: 0
+    });
+
+    // Fetch invitations from backend
+    useEffect(() => {
+        fetchInvitations();
+    }, []);
+
+    const fetchInvitations = async () => {
+        try {
+            setLoading(true);
+            const response = await fetch('http://localhost:8000/admin/get-invites');
+            if (response.ok) {
+                const data = await response.json();
+                const invitesList = data.invites || [];
+                setInvitations(invitesList);
+                
+                // Calculate stats
+                const totalSent = invitesList.length;
+                const pending = invitesList.filter(inv => inv.status === 'pending').length;
+                const activeLinks = invitesList.filter(inv => inv.status !== 'used' && inv.status !== 'expired').length;
+                
+                setStats({
+                    totalSent,
+                    pending,
+                    activeLinks
+                });
+            }
+        } catch (error) {
+            console.error('Error fetching invitations:', error);
+        } finally {
+            setLoading(false);
         }
-    ]);
+    };
 
     const handleInputChange = (e) => {
         const { name, value } = e.target;
         setFormData(prev => ({ ...prev, [name]: value }));
     };
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
-        // TODO: Send invitation API call
-        setShowSuccessToast(true);
-        setTimeout(() => setShowSuccessToast(false), 5000);
         
-        // Reset form
-        setFormData({
-            fullName: '',
-            email: '',
-            seniorityLevel: 'Senior',
-            interviewType: 'video',
-            jobDescription: ''
-        });
+        try {
+            const response = await fetch('http://localhost:8000/admin/send-invite', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(formData)
+            });
+            
+            if (!response.ok) {
+                throw new Error('Failed to send invite');
+            }
+            
+            const data = await response.json();
+            console.log('Invite sent:', data);
+            
+            setShowSuccessToast(true);
+            setTimeout(() => setShowSuccessToast(false), 5000);
+            
+            // Reset form
+            setFormData({
+                fullName: '',
+                email: '',
+                role: '',
+                seniorityLevel: '',
+                jobDescription: ''
+            });
+            
+            // Refetch invitations from database
+            fetchInvitations();
+        } catch (error) {
+            console.error('Error sending invite:', error);
+            alert('Failed to send invite. Please try again.');
+        }
     };
 
     const getInitials = (name) => {
@@ -86,10 +100,54 @@ const InviteCandidateScreen = () => {
 
     const getStatusColor = (status) => {
         switch(status.toLowerCase()) {
+            case 'sent': return 'bg-blue-100 text-blue-700';
             case 'pending': return 'bg-yellow-100 text-yellow-700';
             case 'completed': return 'bg-green-100 text-green-700';
-            case 'invited': return 'bg-primary/10 text-primary';
+            case 'expired': return 'bg-red-100 text-red-700';
             default: return 'bg-gray-100 text-gray-700';
+        }
+    };
+
+    const handleAccessToggle = async (invite) => {
+        try {
+            const response = await fetch(`http://localhost:8000/admin/toggle-access/${invite.invite_code}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ access_enabled: !invite.access_enabled })
+            });
+            
+            if (response.ok) {
+                fetchInvitations();
+            } else {
+                alert('Failed to toggle access');
+            }
+        } catch (error) {
+            console.error('Error toggling access:', error);
+            alert('Failed to toggle access');
+        }
+    };
+
+    const handleDeleteInvite = async (invite) => {
+        if (!window.confirm(`Are you sure you want to revoke access for ${invite.candidate_name}? This action cannot be undone.`)) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`http://localhost:8000/admin/delete-invite/${invite.invite_code}`, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            
+            if (response.ok) {
+                setShowSuccessToast(true);
+                setTimeout(() => setShowSuccessToast(false), 5000);
+                fetchInvitations();
+            } else {
+                alert('Failed to delete invite');
+            }
+        } catch (error) {
+            console.error('Error deleting invite:', error);
+            alert('Failed to delete invite');
         }
     };
 
@@ -207,54 +265,30 @@ const InviteCandidateScreen = () => {
                                 />
                             </div>
 
+                            {/* Role / Position */}
+                            <div className="flex flex-col gap-2">
+                                <label className="text-sm font-bold text-[#0d191b]">Role / Position</label>
+                                <input 
+                                    name="role"
+                                    value={formData.role}
+                                    onChange={handleInputChange}
+                                    className="w-full h-12 px-4 rounded-lg border border-[#cfe4e7] bg-[#f8fbfc] text-[#0d191b] focus:ring-2 focus:ring-primary focus:border-primary transition-all" 
+                                    placeholder="e.g. Senior Frontend Engineer" 
+                                    type="text"
+                                />
+                            </div>
+
                             {/* Seniority Level */}
                             <div className="flex flex-col gap-2">
                                 <label className="text-sm font-bold text-[#0d191b]">Seniority Level</label>
-                                <div className="relative">
-                                    <select 
-                                        name="seniorityLevel"
-                                        value={formData.seniorityLevel}
-                                        onChange={handleInputChange}
-                                        className="w-full h-12 pl-4 pr-10 appearance-none rounded-lg border border-[#cfe4e7] bg-[#f8fbfc] text-[#0d191b] focus:ring-2 focus:ring-primary focus:border-primary transition-all"
-                                    >
-                                        <option>Junior</option>
-                                        <option>Middle</option>
-                                        <option>Senior</option>
-                                        <option>Lead</option>
-                                    </select>
-                                    <span className="absolute right-3 top-1/2 -translate-y-1/2 material-symbols-outlined text-[#4c8e9a] pointer-events-none">unfold_more</span>
-                                </div>
-                            </div>
-
-                            {/* Interview Type Radio Buttons */}
-                            <div className="flex flex-col gap-2">
-                                <label className="text-sm font-bold text-[#0d191b]">Interview Type</label>
-                                <div className="flex gap-4">
-                                    <label className={`flex-1 flex items-center justify-center gap-2 p-3 rounded-lg cursor-pointer transition-all ${formData.interviewType === 'video' ? 'border border-primary/30 bg-primary/5' : 'border border-[#cfe4e7] hover:bg-[#f8fbfc]'}`}>
-                                        <input 
-                                            type="radio" 
-                                            name="interviewType" 
-                                            value="video"
-                                            checked={formData.interviewType === 'video'}
-                                            onChange={handleInputChange}
-                                            className="text-primary focus:ring-primary" 
-                                        />
-                                        <span className={`material-symbols-outlined ${formData.interviewType === 'video' ? 'text-primary' : 'text-[#4c8e9a]'}`}>videocam</span>
-                                        <span className="text-sm font-semibold">Video Call</span>
-                                    </label>
-                                    <label className={`flex-1 flex items-center justify-center gap-2 p-3 rounded-lg cursor-pointer transition-all ${formData.interviewType === 'audio' ? 'border border-primary/30 bg-primary/5' : 'border border-[#cfe4e7] hover:bg-[#f8fbfc]'}`}>
-                                        <input 
-                                            type="radio" 
-                                            name="interviewType" 
-                                            value="audio"
-                                            checked={formData.interviewType === 'audio'}
-                                            onChange={handleInputChange}
-                                            className="text-primary focus:ring-primary" 
-                                        />
-                                        <span className={`material-symbols-outlined ${formData.interviewType === 'audio' ? 'text-primary' : 'text-[#4c8e9a]'}`}>call</span>
-                                        <span className="text-sm font-semibold text-[#4c8e9a]">Audio Call</span>
-                                    </label>
-                                </div>
+                                <input 
+                                    name="seniorityLevel"
+                                    value={formData.seniorityLevel}
+                                    onChange={handleInputChange}
+                                    className="w-full h-12 px-4 rounded-lg border border-[#cfe4e7] bg-[#f8fbfc] text-[#0d191b] focus:ring-2 focus:ring-primary focus:border-primary transition-all" 
+                                    placeholder="e.g. Senior, Mid-level, Junior" 
+                                    type="text"
+                                />
                             </div>
 
                             {/* Job Description Area */}
@@ -289,15 +323,15 @@ const InviteCandidateScreen = () => {
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                             <div className="bg-white p-5 rounded-xl border border-[#e7f1f3] shadow-sm">
                                 <p className="text-[#4c8e9a] text-xs font-bold uppercase tracking-wider">Total Sent</p>
-                                <h3 className="text-2xl font-black mt-1">1,284</h3>
+                                <h3 className="text-2xl font-black mt-1">{stats.totalSent}</h3>
                             </div>
                             <div className="bg-white p-5 rounded-xl border border-[#e7f1f3] shadow-sm">
                                 <p className="text-[#4c8e9a] text-xs font-bold uppercase tracking-wider">Pending</p>
-                                <h3 className="text-2xl font-black mt-1 text-primary">42</h3>
+                                <h3 className="text-2xl font-black mt-1 text-primary">{stats.pending}</h3>
                             </div>
                             <div className="bg-white p-5 rounded-xl border border-[#e7f1f3] shadow-sm">
                                 <p className="text-[#4c8e9a] text-xs font-bold uppercase tracking-wider">Active Links</p>
-                                <h3 className="text-2xl font-black mt-1 text-green-500">118</h3>
+                                <h3 className="text-2xl font-black mt-1 text-green-500">{stats.activeLinks}</h3>
                             </div>
                         </div>
 
@@ -316,56 +350,89 @@ const InviteCandidateScreen = () => {
                             </div>
                             <div className="overflow-x-auto">
                                 <table className="w-full text-left">
-                                    <thead>
+                                                    <thead>
                                         <tr className="bg-[#f8fbfc] text-[#4c8e9a] text-xs font-bold uppercase">
                                             <th className="px-6 py-4">Candidate</th>
                                             <th className="px-6 py-4">Role / Level</th>
                                             <th className="px-6 py-4">Date Sent</th>
                                             <th className="px-6 py-4">Status</th>
-                                            <th className="px-6 py-4 text-right">Access</th>
+                                            <th className="px-6 py-4 text-center">Access</th>
+                                            <th className="px-6 py-4 text-right">Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-[#e7f1f3]">
-                                        {invitations.map((invite) => (
-                                            <tr key={invite.id} className="hover:bg-primary/5 transition-colors group">
-                                                <td className="px-6 py-4">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className={`size-9 rounded-full flex items-center justify-center font-bold ${invite.status === 'Completed' ? 'bg-[#e7f1f3] text-[#4c8e9a]' : 'bg-primary/20 text-primary'}`}>
-                                                            {getInitials(invite.name)}
-                                                        </div>
-                                                        <div>
-                                                            <p className="font-bold text-sm">{invite.name}</p>
-                                                            <p className="text-xs text-[#4c8e9a]">{invite.email}</p>
-                                                        </div>
-                                                    </div>
-                                                </td>
-                                                <td className="px-6 py-4">
-                                                    <div className="flex flex-col">
-                                                        <span className="text-sm font-semibold">{invite.role}</span>
-                                                        <span className="text-[10px] text-[#4c8e9a] font-bold uppercase">{invite.level}</span>
-                                                    </div>
-                                                </td>
-                                                <td className="px-6 py-4">
-                                                    <p className="text-sm">{invite.dateSent}</p>
-                                                    <p className="text-[10px] text-[#4c8e9a]">{invite.time}</p>
-                                                </td>
-                                                <td className="px-6 py-4">
-                                                    <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${getStatusColor(invite.status)}`}>
-                                                        {invite.status}
-                                                    </span>
-                                                </td>
-                                                <td className="px-6 py-4 text-right">
-                                                    <button className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${invite.accessEnabled ? 'bg-primary' : 'bg-gray-200'}`}>
-                                                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${invite.accessEnabled ? 'translate-x-6' : 'translate-x-1'}`}></span>
-                                                    </button>
+                                        {loading ? (
+                                            <tr>
+                                                <td colSpan="6" className="px-6 py-8 text-center text-[#4c8e9a]">
+                                                    Loading invitations...
                                                 </td>
                                             </tr>
-                                        ))}
+                                        ) : invitations.length === 0 ? (
+                                            <tr>
+                                                <td colSpan="6" className="px-6 py-8 text-center text-[#4c8e9a]">
+                                                    No invitations sent yet
+                                                </td>
+                                            </tr>
+                                        ) : (
+                                            invitations.map((invite) => {
+                                                const createdDate = new Date(invite.created_at);
+                                                const formattedDate = createdDate.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+                                                const formattedTime = createdDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                                                
+                                                return (
+                                                    <tr key={invite.id} className="hover:bg-primary/5 transition-colors group">
+                                                        <td className="px-6 py-4">
+                                                            <div className="flex items-center gap-3">
+                                                                <div className={`size-9 rounded-full flex items-center justify-center font-bold ${invite.status === 'used' ? 'bg-[#e7f1f3] text-[#4c8e9a]' : 'bg-primary/20 text-primary'}`}>
+                                                                    {getInitials(invite.candidate_name)}
+                                                                </div>
+                                                                <div>
+                                                                    <p className="font-bold text-sm">{invite.candidate_name}</p>
+                                                                    <p className="text-xs text-[#4c8e9a]">{invite.candidate_email}</p>
+                                                                </div>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <div className="flex flex-col">
+                                                                <span className="text-sm font-semibold">{invite.role || 'Candidate'}</span>
+                                                                <span className="text-[10px] text-[#4c8e9a] font-bold uppercase">{invite.seniority_level}</span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <p className="text-sm">{formattedDate}</p>
+                                                            <p className="text-[10px] text-[#4c8e9a]">{formattedTime}</p>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase ${getStatusColor(invite.status)}`}>
+                                                                {invite.status}
+                                                            </span>
+                                                        </td>
+                                                        <td className="px-6 py-4 text-center">
+                                                            <button 
+                                                                onClick={() => handleAccessToggle(invite)}
+                                                                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${invite.access_enabled !== false ? 'bg-primary' : 'bg-gray-200'}`}
+                                                            >
+                                                                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${invite.access_enabled !== false ? 'translate-x-6' : 'translate-x-1'}`}></span>
+                                                            </button>
+                                                        </td>
+                                                        <td className="px-6 py-4 text-right">
+                                                            <button 
+                                                                onClick={() => handleDeleteInvite(invite)}
+                                                                className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                                                                title="Revoke access and delete"
+                                                            >
+                                                                <span className="material-symbols-outlined text-lg">delete</span>
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })
+                                        )}
                                     </tbody>
                                 </table>
                             </div>
                             <div className="px-6 py-4 bg-[#f8fbfc] flex items-center justify-between">
-                                <p className="text-xs text-[#4c8e9a] font-semibold">Showing 4 of 1,284 results</p>
+                                <p className="text-xs text-[#4c8e9a] font-semibold">Showing {invitations.length} of {stats.totalSent} results</p>
                                 <div className="flex gap-1">
                                     <button className="size-8 flex items-center justify-center rounded border border-[#cfe4e7] text-[#4c8e9a] hover:bg-white">
                                         <span className="material-symbols-outlined text-sm">chevron_left</span>

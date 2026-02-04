@@ -40,6 +40,35 @@ def auth_callback(user_info: UserInfo):
     # Check for admin based on @accellor.com domain
     is_admin = user_info.email.endswith("@accellor.com")
     
+    # Check Cosmos DB for user status
+    is_active = True
+    user_id_from_cosmos = None
+    try:
+        from backend.core.cosmos import users_container
+        query = "SELECT * FROM users WHERE users.user_email = @email"
+        items = list(users_container.query_items(
+            query=query,
+            parameters=[{"name": "@email", "value": user_info.email}],
+            max_item_count=1
+        ))
+        if items:
+            cosmos_user = items[0]
+            is_active = cosmos_user.get("is_active", True)
+            user_id_from_cosmos = cosmos_user.get("user_id")
+            if cosmos_user.get("is_admin") is not None:
+                is_admin = cosmos_user.get("is_admin")
+            
+            if not is_active:
+                logger.warning(f"Inactive user attempted to login: {user_info.email}")
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Your account has been deactivated. Please contact an administrator."
+                )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"Could not check Cosmos DB for user status: {e}")
+    
     # Check if user exists in memory
     if user_info.sub in in_memory_users:
         user_data = in_memory_users[user_info.sub]
@@ -48,24 +77,27 @@ def auth_callback(user_info: UserInfo):
             "full_name": user_info.name,
             "picture": user_info.picture,
             "is_admin": is_admin or user_data.get("is_admin", False),
+            "is_active": is_active,
             "updated_at": datetime.utcnow()
         })
+        if user_id_from_cosmos:
+            user_data["id"] = user_id_from_cosmos
         logger.info(f"Updated existing user: {user_info.email}")
     else:
         # Create new in-memory user
         user_data = {
-            "id": str(uuid.uuid4()),
+            "id": user_id_from_cosmos or str(uuid.uuid4()),
             "auth0_sub": user_info.sub,
             "email": user_info.email,
             "full_name": user_info.name,
             "picture": user_info.picture,
             "is_admin": is_admin,
-            "is_active": True,
+            "is_active": is_active,
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow()
         }
         in_memory_users[user_info.sub] = user_data
-        logger.info(f"Created new user: {user_info.email} (admin={is_admin})")
+        logger.info(f"Created new user: {user_info.email} (admin={is_admin}, active={is_active})")
     
     return {
         "user": {
@@ -84,8 +116,39 @@ def microsoft_callback(user_info: UserInfo):
     Handle Microsoft/Azure AD authentication callback
     Create or update user in memory after Microsoft authentication
     """
+    logger.info(f"Microsoft callback for user: {user_info.email}")
+    
     # Check for admin based on @accellor.com domain
     is_admin = user_info.email.endswith("@accellor.com")
+    
+    # Check Cosmos DB for user status
+    is_active = True
+    user_id_from_cosmos = None
+    try:
+        from backend.core.cosmos import users_container
+        query = "SELECT * FROM users WHERE users.user_email = @email"
+        items = list(users_container.query_items(
+            query=query,
+            parameters=[{"name": "@email", "value": user_info.email}],
+            max_item_count=1
+        ))
+        if items:
+            cosmos_user = items[0]
+            is_active = cosmos_user.get("is_active", True)
+            user_id_from_cosmos = cosmos_user.get("user_id")
+            if cosmos_user.get("is_admin") is not None:
+                is_admin = cosmos_user.get("is_admin")
+            
+            if not is_active:
+                logger.warning(f"Inactive user attempted to login: {user_info.email}")
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Your account has been deactivated. Please contact an administrator."
+                )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"Could not check Cosmos DB for user status: {e}")
     
     # Check if user exists in memory
     if user_info.sub in in_memory_users:
@@ -95,25 +158,28 @@ def microsoft_callback(user_info: UserInfo):
             "full_name": user_info.name,
             "picture": user_info.picture,
             "is_admin": is_admin or user_data.get("is_admin", False),
+            "is_active": is_active,
             "updated_at": datetime.utcnow()
         })
+        if user_id_from_cosmos:
+            user_data["id"] = user_id_from_cosmos
         logger.info(f"Updated existing Microsoft user: {user_info.email}")
     else:
         # Create new in-memory user
         user_data = {
-            "id": str(uuid.uuid4()),
+            "id": user_id_from_cosmos or str(uuid.uuid4()),
             "auth0_sub": user_info.sub,
             "email": user_info.email,
             "full_name": user_info.name,
             "picture": user_info.picture,
             "is_admin": is_admin,
-            "is_active": True,
+            "is_active": is_active,
             "provider": "microsoft",
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow()
         }
         in_memory_users[user_info.sub] = user_data
-        logger.info(f"Created new Microsoft user: {user_info.email} (admin={is_admin})")
+        logger.info(f"Created new Microsoft user: {user_info.email} (admin={is_admin}, active={is_active})")
     
     return {
         "user": {

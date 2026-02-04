@@ -3,7 +3,7 @@ import { useInterview } from '../../context/InterviewContext';
 import { api, speakText } from '../../utils/api';
 
 const SetupScreen = () => {
-    const { navigateTo, updateInterview, resetInterview, backendAvailable, theme, toggleTheme } = useInterview();
+    const { navigateTo, updateInterview, resetInterview, backendAvailable, theme, toggleTheme, user } = useInterview();
     const [formData, setFormData] = useState({
         role: '',
         experience: '',
@@ -19,6 +19,19 @@ const SetupScreen = () => {
 
     const roles = ['Frontend Developer', 'Backend Developer', 'Full Stack Engineer', 'DevOps Engineer', 'Product Manager', 'Solutions Architect', 'Security Engineer', 'Data Engineer', 'QA Engineer'];
     const experiences = ['Intern', 'Junior', 'Mid-Level', 'Senior', 'Staff', 'Principal', 'Entry-level'];
+
+    // Auto-fill role and experience from user profile on mount
+    useEffect(() => {
+        const jobTitle = localStorage.getItem('job_title');
+        const experienceLevel = localStorage.getItem('experience_level');
+        
+        if (jobTitle && !formData.role) {
+            setFormData(prev => ({ ...prev, role: jobTitle }));
+        }
+        if (experienceLevel && !formData.experience) {
+            setFormData(prev => ({ ...prev, experience: experienceLevel }));
+        }
+    }, []);
 
     // Close dropdowns when clicking outside
     useEffect(() => {
@@ -107,6 +120,11 @@ const SetupScreen = () => {
 
             updateInterview({
                 sessionId: result.session_id,
+                userId: user?.id || localStorage.getItem('user_id') || 'anonymous',
+                userEmail: user?.email || localStorage.getItem('user_email') || 'unknown@example.com',
+                userName: user?.name || localStorage.getItem('user_name'),
+                jobTitle: localStorage.getItem('job_title') || user?.jobTitle || role,
+                companyName: localStorage.getItem('company_name') || user?.companyName,
                 currentQuestion: result.question,
                 questionNumber: 1,
                 totalQuestions: result.total_questions || 5,
@@ -116,6 +134,7 @@ const SetupScreen = () => {
                 persona: formData.persona === 'coach' ? 'coach' : 'strict',
                 roleDisplay,
                 questionText: result.question,
+                startedAt: new Date().toISOString(),
             });
 
             console.log('Interview started successfully!');

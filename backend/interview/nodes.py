@@ -1,4 +1,5 @@
-from typing import Dict
+from typing import Dict, Optional
+from datetime import datetime
 from langgraph.types import interrupt
 from backend.interview.models import InterviewState
 from backend.interview.agents import (
@@ -8,7 +9,9 @@ from backend.interview.agents import (
     end_interview_agent,
     transition_agent
 )
+from backend.core.cosmos import questions_container, Question
 import logging
+import hashlib
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +23,210 @@ def _extract_attr(obj, attr_name):
     return getattr(obj, attr_name, None)
 
 
+def _normalize_question_text(text: str) -> str:
+    """Normalize question text for deduplication (lowercase, strip whitespace)."""
+    return text.lower().strip()
+
+
+def _get_question_hash(text: str) -> str:
+    """Generate a hash of the normalized question text."""
+    normalized = _normalize_question_text(text)
+    return hashlib.md5(normalized.encode()).hexdigest()
+
+
+def _classify_question_category(question_text: str) -> str:
+    """
+    Classify the question into categories based on keywords in the question text.
+    Categories: Behavioral, Technical, Architecture, Management
+    """
+    question_lower = question_text.lower()
+    
+    # Behavioral keywords
+    behavioral_keywords = [
+        "tell me about a time", "describe a situation", "have you ever", "how would you handle",
+        "conflict", "disagree", "mistake", "failure", "challenge", "learned", "experience",
+        "example", "past", "you've worked", "team", "collaborated", "decision"
+    ]
+    
+    # Architecture keywords
+    architecture_keywords = [
+        "design", "architect", "scale", "system", "distributed", "microservice",
+        "infrastructure", "database design", "api design", "tradeoff", "trade-off",
+        "load balancing", "caching", "replication", "data flow", "component"
+    ]
+    
+    # Management keywords
+    management_keywords = [
+        "lead", "manage", "mentor", "hire", "team", "process", "methodology",
+        "agile", "deadline", "priority", "stakeholder", "communication", "culture",
+        "feedback", "performance"
+    ]
+    
+    # Check for architecture (higher priority)
+    for keyword in architecture_keywords:
+        if keyword in question_lower:
+            return "Architecture"
+    
+    # Check for management
+    for keyword in management_keywords:
+        if keyword in question_lower:
+            # Exclude team-related behavioral questions
+            if not any(bk in question_lower for bk in ["tell me about", "describe", "have you ever"]):
+                return "Management"
+    
+    # Check for behavioral
+    for keyword in behavioral_keywords:
+        if keyword in question_lower:
+            return "Behavioral"
+    
+    # Default to Technical
+    return "Technical"
+
+
+def _is_duplicate_question(question_text: str, category: str) -> bool:
+    """Check if a similar question already exists in the database."""
+    try:
+        question_hash = _get_question_hash(question_text)
+        # Query by category and check if similar question exists
+        query = f"SELECT * FROM questions c WHERE c.category = @category AND c.hash = @hash"
+        items = list(questions_container.query_items(
+            query=query,
+            parameters=[
+                {"name": "@category", "value": category},
+                {"name": "@hash", "value": question_hash}
+            ],
+            enable_cross_partition_query=True
+        ))
+        return len(items) > 0
+    except Exception as e:
+        logger.warning(f"Error checking for duplicate question: {e}")
+        return False
+
+
+def _save_question_to_db(question_text: str, category: str, role: str, experience: str, topic: Optional[str] = None) -> str:
+    """
+    Save a generated question to Cosmos DB (with deduplication).
+    Returns the unique question ID.
+    """
+    try:
+        if _is_duplicate_question(question_text, category):
+            logger.info(f"Question already exists in database, skipping save: {question_text[:80]}...")
+            # Find and return existing question ID
+            question_hash = _get_question_hash(question_text)
+            query = f"SELECT c.id FROM questions c WHERE c.category = @category AND c.hash = @hash"
+            items = list(questions_container.query_items(
+                query=query,
+                parameters=[
+                    {"name": "@category", "value": category},
+                    {"name": "@hash", "value": question_hash}
+                ],
+                enable_cross_partition_query=True
+            ))
+            if items:
+                return items[0]['id']
+        
+        question_hash = _get_question_hash(question_text)
+        question_id = f"{question_hash}_{int(datetime.utcnow().timestamp() * 1000)}"
+        question_doc = {
+            "id": question_id,
+            "text": question_text,
+            "category": category,
+            "role": role,
+            "experience": experience,
+            "topic": topic,
+            "hash": question_hash,
+            "created_at": datetime.utcnow().isoformat(),
+            "uses_count": 0,
+            "rating": None
+        }
+        
+        questions_container.create_item(body=question_doc)
+        logger.info(f"✅ Question saved to database with ID: {question_id}")
+        return question_id
+    except Exception as e:
+        logger.error(f"Error saving question to database: {e}")
+        return None
+
+
+def _log_question_asked(user_id: str, question_id: str, question_text: str, session_id: Optional[str] = None):
+    """Log that a question was asked to a user."""
+    try:
+        from backend.core.cosmos import question_logs_container
+        from uuid import uuid4
+        
+        log_doc = {
+            "id": str(uuid4()),
+            "user_id": user_id,
+            "question_id": question_id,
+            "question_text": question_text,
+            "session_id": session_id,
+            "asked_at": datetime.utcnow().isoformat(),
+            "answered": False,
+            "answer_score": None
+        }
+        
+        question_logs_container.create_item(body=log_doc)
+        logger.info(f"✅ Question logged for user {user_id}: {question_id}")
+    except Exception as e:
+        logger.error(f"Error logging question: {e}")
+
+
+def _get_user_asked_questions(user_id: str) -> set:
+    """Get all question IDs that have been asked to a user."""
+    try:
+        from backend.core.cosmos import question_logs_container
+        
+        query = "SELECT DISTINCT c.question_id FROM question_logs c WHERE c.user_id = @user_id"
+        items = list(question_logs_container.query_items(
+            query=query,
+            parameters=[{"name": "@user_id", "value": user_id}],
+            enable_cross_partition_query=False  # Same partition key
+        ))
+        
+        question_ids = {item['question_id'] for item in items}
+        logger.info(f"User {user_id} has been asked {len(question_ids)} unique questions")
+        return question_ids
+    except Exception as e:
+        logger.warning(f"Error fetching user's asked questions: {e}")
+        return set()
+
+
+def _get_unasked_question_from_bank(user_id: str, role: Optional[str] = None, experience: Optional[str] = None) -> Optional[dict]:
+    """
+    Return a question from the bank that the user has not been asked yet.
+    Prioritizes role/difficulty matches when provided.
+    """
+    try:
+        from backend.core.cosmos import questions_container
+
+        asked_ids = _get_user_asked_questions(user_id) if user_id else set()
+        query = "SELECT * FROM questions c WHERE 1=1"
+        parameters = []
+
+        if role and role != "All Roles":
+            query += " AND c.role = @role"
+            parameters.append({"name": "@role", "value": role})
+
+        if experience and experience != "All Experience":
+            query += " AND c.experience = @experience"
+            parameters.append({"name": "@experience", "value": experience})
+
+        items = list(questions_container.query_items(
+            query=query,
+            parameters=parameters,
+            enable_cross_partition_query=True
+        ))
+
+        for item in items:
+            if item.get("id") and item.get("id") not in asked_ids:
+                return item
+
+        return None
+    except Exception as e:
+        logger.warning(f"Error fetching unasked question from bank: {e}")
+        return None
+
+
 def ask_question_node(state: InterviewState) -> Dict:
     """
     Generate the next interview question.
@@ -29,17 +236,121 @@ def ask_question_node(state: InterviewState) -> Dict:
     a professional interview question.
 
     Update the current question and track it as asked.
+    Save unique questions to Cosmos DB and log for user.
+    
+    PREVENTS RE-ASKING: Uses unasked bank questions first, then retries LLM generation.
     """
     logger.debug(f"Generating question (difficulty={state['difficulty']}, count={state['question_count']})")
-    q = ask_question_agent(state)
-    question_text = _extract_attr(q, "question")
+    
+    # Get user's previously asked question IDs to prevent re-asking
+    user_id = state.get("user_id")
+    previously_asked_ids = set()
+    if user_id:
+        previously_asked_ids = _get_user_asked_questions(user_id)
+        logger.info(f"User {user_id} has been asked {len(previously_asked_ids)} questions already")
+
+    # 1) Prefer unasked question bank items first
+    if user_id:
+        bank_question = _get_unasked_question_from_bank(
+            user_id=user_id,
+            role=state.get("role"),
+            experience=state.get("experience")
+        )
+        if bank_question:
+            question_id = bank_question.get("id")
+            question_text = bank_question.get("text")
+            logger.info(f"✅ Using unasked question from bank: {question_id}")
+
+            # Log that this question was asked to this user
+            session_id = state.get("session_id")
+            if question_id and user_id:
+                _log_question_asked(user_id, question_id, question_text, session_id)
+
+            # Store question ID in state for tracking
+            question_ids_asked = state.get("question_ids_asked", [])
+            if question_id:
+                question_ids_asked = question_ids_asked + [question_id]
+
+            return {
+                "current_question": question_text,
+                "current_question_id": question_id,
+                "asked_questions": state["asked_questions"] + [question_text],
+                "question_ids_asked": question_ids_asked,
+                "feedback": None,
+                "spoken_transition": None,
+            }
+    
+    # 2) If no unasked bank question, try LLM generation
+    # Try up to 3 times to generate a new question that hasn't been asked before
+    max_retries = 3
+    question_id = None
+    question_text = None
+    
+    for attempt in range(max_retries):
+        q = ask_question_agent(state)
+        question_text = _extract_attr(q, "question")
+        
+        if not question_text:
+            logger.error(f"Question generation failed: got {type(q).__name__} = {q}")
+            raise ValueError(f"Question generation failed: missing 'question' field")
+        
+        logger.info(f"Generated question (attempt {attempt + 1}/{max_retries}): {question_text[:100]}...")
+        
+        # Save question to database (with deduplication)
+        category = _classify_question_category(question_text)
+        experience = state.get("experience", "Mid-Level")
+        question_id = _save_question_to_db(
+            question_text=question_text,
+            category=category,
+            role=state.get("role", "All Roles"),
+            experience=experience,
+            topic=state.get("topic")
+        )
+        
+        # Check if this question was already asked to this user
+        if question_id and question_id in previously_asked_ids:
+            logger.warning(f"Question ID {question_id} was already asked to user {user_id}. Retrying...")
+            question_text = None
+            question_id = None
+            continue
+        else:
+            # Question is new - use it
+            logger.info(f"✅ Question is new (ID: {question_id})")
+            break
+    
+    # If we couldn't generate a new question after retries, use the last one anyway
     if not question_text:
-        logger.error(f"Question generation failed: got {type(q).__name__} = {q}")
-        raise ValueError(f"Question generation failed: missing 'question' field")
-    logger.info(f"Generated question: {question_text[:100]}...")
+        logger.warning(f"Could not generate a new question after {max_retries} attempts. Using latest generation.")
+        q = ask_question_agent(state)
+        question_text = _extract_attr(q, "question")
+        if not question_text:
+            raise ValueError(f"Question generation failed: missing 'question' field")
+        
+        category = _classify_question_category(question_text)
+        experience = state.get("experience", "Mid-Level")
+        question_id = _save_question_to_db(
+            question_text=question_text,
+            category=category,
+            role=state.get("role", "All Roles"),
+            experience=experience,
+            topic=state.get("topic")
+        )
+    
+    # Log that this question was asked to this user
+    session_id = state.get("session_id")
+    if question_id and user_id:
+        _log_question_asked(user_id, question_id, question_text, session_id)
+    
+    # Store question ID in state for tracking
+    question_ids_asked = state.get("question_ids_asked", [])
+    if question_id:
+        question_ids_asked = question_ids_asked + [question_id]
+    
     return {
         "current_question": question_text,
+        "current_question_id": question_id,  # Track the question ID
         "asked_questions": state["asked_questions"] + [question_text],
+        "question_ids_asked": question_ids_asked,  # Track all question IDs asked
         # Clear feedback and transition from previous cycle for fresh evaluation
         "feedback": None,
         "spoken_transition": None,

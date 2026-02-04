@@ -6,8 +6,12 @@ const HistoryScreen = () => {
     const { navigateTo, theme } = useInterview();
     const [expandedRow, setExpandedRow] = useState(null);
     const [sessions, setSessions] = useState([]);
+    const [allSessions, setAllSessions] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [timeFilter, setTimeFilter] = useState('all');
+    const [showDropdown, setShowDropdown] = useState(false);
+    const [showAnalytics, setShowAnalytics] = useState(true);
 
     useEffect(() => {
         loadSessions();
@@ -16,30 +20,46 @@ const HistoryScreen = () => {
     const loadSessions = async () => {
         try {
             setLoading(true);
-            const data = await historyApi.getUserSessions();
+            // Get user ID from context or localStorage
+            const userId = localStorage.getItem('user_id') || 'anonymous';
             
-            // Transform API data to match UI format
-            const transformedSessions = data.map((session, index) => ({
-                id: index + 1,
-                session_id: session.session_id,
-                date: new Date(session.started_at).toLocaleDateString('en-US', { 
-                    month: 'short', 
-                    day: 'numeric', 
-                    year: 'numeric' 
-                }),
-                time: new Date(session.started_at).toLocaleTimeString('en-US', { 
-                    hour: '2-digit', 
-                    minute: '2-digit' 
-                }),
-                role: session.job_title || 'Interview',
-                icon: getIconForRole(session.job_title),
-                color: getColorForRole(session.job_title),
-                score: Math.round((session.overall_score || 0) * 100),
-                verdict: getVerdictForScore(session.overall_score || 0),
-                scoreColor: getScoreColor(session.overall_score || 0),
-                duration: session.duration_seconds ? `${Math.round(session.duration_seconds / 60)}m` : 'N/A',
-            }));
+            console.log('Loading sessions for user:', userId);
             
+            // Fetch from Cosmos DB via new API endpoint
+            const data = await historyApi.getUserHistory(userId);
+            
+            console.log('Received from Cosmos DB:', data);
+            
+            // Transform Cosmos DB data to match UI format
+            const transformedSessions = (data || []).map((session, index) => {
+                console.log('Transforming session:', session);
+                const sessionDate = new Date(session.completed_at || session.started_at);
+                return {
+                    id: index + 1,
+                    session_id: session.session_id,
+                    date: sessionDate.toLocaleDateString(undefined, { 
+                        month: 'short', 
+                        day: 'numeric', 
+                        year: 'numeric' 
+                    }),
+                    time: sessionDate.toLocaleTimeString(undefined, { 
+                        hour: '2-digit', 
+                        minute: '2-digit',
+                        hour12: true
+                    }),
+                    role: session.job_title || 'Interview',
+                    icon: getIconForRole(session.job_title),
+                    color: getColorForRole(session.job_title),
+                    score: Math.round(session.overall_score || 0),
+                    verdict: getVerdictForScore(session.overall_score || 0),
+                    scoreColor: getScoreColor(session.overall_score || 0),
+                    duration: session.duration_seconds ? `${Math.round(session.duration_seconds / 60)}m` : 'N/A',
+                    fullData: session // Store full session data for detail view
+                };
+            });
+            
+            console.log('Transformed sessions:', transformedSessions);
+            setAllSessions(transformedSessions);
             setSessions(transformedSessions);
         } catch (err) {
             setError(err.message);
@@ -68,22 +88,52 @@ const HistoryScreen = () => {
     };
 
     const getVerdictForScore = (score) => {
-        if (score >= 0.9) return 'Excellent';
-        if (score >= 0.8) return 'Great';
-        if (score >= 0.7) return 'Good';
-        if (score >= 0.6) return 'Average';
+        if (score >= 9) return 'Excellent';
+        if (score >= 8) return 'Great';
+        if (score >= 7) return 'Good';
+        if (score >= 6) return 'Average';
         return 'Needs Improvement';
     };
 
     const getScoreColor = (score) => {
-        if (score >= 0.85) return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300';
-        if (score >= 0.7) return 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300';
-        if (score >= 0.6) return 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300';
+        if (score >= 8.5) return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300';
+        if (score >= 7) return 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300';
+        if (score >= 6) return 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300';
         return 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300';
     };
 
+    const filterByTime = (filter) => {
+        setTimeFilter(filter);
+        setShowDropdown(false);
+        
+        if (filter === 'all') {
+            setSessions(allSessions);
+            return;
+        }
+        
+        const now = new Date();
+        const filtered = allSessions.filter(session => {
+            const sessionDate = new Date(session.fullData.completed_at || session.fullData.started_at);
+            const daysDiff = (now - sessionDate) / (1000 * 60 * 60 * 24);
+            
+            if (filter === '7d') return daysDiff <= 7;
+            if (filter === '30d') return daysDiff <= 30;
+            if (filter === '90d') return daysDiff <= 90;
+            return true;
+        });
+        
+        setSessions(filtered);
+    };
+
+    const getFilterLabel = () => {
+        if (timeFilter === '7d') return 'Last 7 Days';
+        if (timeFilter === '30d') return 'Last 30 Days';
+        if (timeFilter === '90d') return 'Last 90 Days';
+        return 'All Time';
+    };
+
     const avgScore = sessions.length > 0 
-        ? Math.round(sessions.reduce((sum, s) => sum + s.score, 0) / sessions.length)
+        ? Math.round((sessions.reduce((sum, s) => sum + s.score, 0) / sessions.length) * 10)
         : 0;
 
     return (
@@ -101,15 +151,37 @@ const HistoryScreen = () => {
                                 Review your past interview sessions, track your scores, and analyze performance reports.
                             </p>
                         </div>
-                        <button className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-semibold text-slate-700 dark:text-slate-200 shadow-sm hover:border-primary/50 transition-colors">
-                            <span className="material-symbols-outlined text-[20px] text-slate-400">
-                                calendar_month
-                            </span>
-                            Last 30 Days
-                            <span className="material-symbols-outlined text-[20px] text-slate-400">
-                                arrow_drop_down
-                            </span>
-                        </button>
+                        <div className="relative">
+                            <button 
+                                onClick={() => setShowDropdown(!showDropdown)}
+                                className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-semibold text-slate-700 dark:text-slate-200 shadow-sm hover:border-primary/50 transition-colors"
+                            >
+                                <span className="material-symbols-outlined text-[20px] text-slate-400">
+                                    calendar_month
+                                </span>
+                                {getFilterLabel()}
+                                <span className="material-symbols-outlined text-[20px] text-slate-400">
+                                    arrow_drop_down
+                                </span>
+                            </button>
+                            {showDropdown && (
+                                <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg shadow-lg z-10">
+                                    {['7d', '30d', '90d', 'all'].map(filter => (
+                                        <button
+                                            key={filter}
+                                            onClick={() => filterByTime(filter)}
+                                            className={`w-full text-left px-4 py-2.5 text-sm font-medium transition-colors first:rounded-t-lg last:rounded-b-lg ${
+                                                timeFilter === filter 
+                                                    ? 'bg-primary/10 text-primary dark:text-teal-300' 
+                                                    : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'
+                                            }`}
+                                        >
+                                            {filter === '7d' ? 'Last 7 Days' : filter === '30d' ? 'Last 30 Days' : filter === '90d' ? 'Last 90 Days' : 'All Time'}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
                     </div>
 
                     {/* Error State */}
@@ -149,6 +221,7 @@ const HistoryScreen = () => {
                     ) : (
                         <>
                             {/* Stats Cards */}
+                            {showAnalytics && (
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-6">
                                 {/* Total Sessions */}
                                 <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden group">
@@ -202,13 +275,14 @@ const HistoryScreen = () => {
                                         </p>
                                         <div className="flex items-baseline gap-2">
                                             <h3 className="text-4xl font-black text-slate-900 dark:text-white">
-                                                {Math.max(...sessions.map(s => s.score))}
+                                                {Math.round(Math.max(...sessions.map(s => s.score)) * 10)}
                                                 <span className="text-2xl text-slate-400">%</span>
                                             </h3>
                                         </div>
                                     </div>
                                 </div>
                             </div>
+                            )}
                         </>
                     )}
 
@@ -217,10 +291,13 @@ const HistoryScreen = () => {
                         <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm overflow-hidden flex flex-col">
                             <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/50">
                                 <h3 className="font-bold text-slate-800 dark:text-slate-200">Recent Sessions</h3>
-                                <button className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white text-sm font-semibold flex items-center gap-1 transition-colors">
-                                    View Analytics{' '}
+                                <button 
+                                    onClick={() => setShowAnalytics(!showAnalytics)}
+                                    className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white text-sm font-semibold flex items-center gap-1 transition-colors"
+                                >
+                                    {showAnalytics ? 'Hide' : 'Show'} Analytics{' '}
                                     <span className="material-symbols-outlined text-[16px]">
-                                        arrow_forward
+                                        {showAnalytics ? 'visibility_off' : 'visibility'}
                                     </span>
                                 </button>
                             </div>
@@ -275,7 +352,7 @@ const HistoryScreen = () => {
                                                 <td className="px-6 py-4">
                                                     <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${session.scoreColor} border border-current border-opacity-20`}>
                                                         <span className="size-1.5 rounded-full bg-current opacity-50"></span>
-                                                        {session.score}/100 ({session.verdict})
+                                                        {session.score}/10 ({session.verdict})
                                                     </span>
                                                 </td>
                                                 <td className="px-6 py-4 text-sm text-slate-500 dark:text-slate-400 flex items-center gap-1">

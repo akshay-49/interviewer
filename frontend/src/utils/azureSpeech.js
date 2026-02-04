@@ -80,23 +80,19 @@ export class AzureSpeechRecognizer {
             // Reset transcript
             this.finalTranscript = '';
             
-            // Set up event handlers
             this.recognizer.recognizing = (s, e) => {
-                if (e.result.reason === this.SpeechSDK.ResultReason.RecognizingSpeech) {
-                    // Emit ONLY interim text (not accumulated)
-                    if (this.onresult) {
-                        const event = {
-                            results: [{
-                                transcript: e.result.text,
-                                isFinal: false
-                            }],
-                            resultIndex: 0
-                        };
-                        this.onresult(event);
-                    }
+                console.log('Interim result:', e.result.text);
+                if (this.onresult) {
+                    this.onresult({
+                        results: [{
+                            transcript: e.result.text,
+                            isFinal: false
+                        }],
+                        resultIndex: 0
+                    });
                 }
             };
-            
+
             this.recognizer.recognized = (s, e) => {
                 if (e.result.reason === this.SpeechSDK.ResultReason.RecognizedSpeech && e.result.text) {
                     // Emit ONLY the final recognized text (not accumulated)
@@ -147,65 +143,180 @@ export class AzureSpeechRecognizer {
                 }
             );
             
+            // Add timeout to auto-stop after max recording time (5 minutes)
+            setTimeout(() => {
+                if (this.isRecording) {
+                    console.log('Max recording time reached, stopping...');
+                    this.stop();
+                }
+            }, 5 * 60 * 1000);
         } catch (error) {
-            console.error('Error starting Azure Speech Recognition:', error);
+            console.error('Error starting recognition:', error);
+            alert('Failed to start speech recognition: ' + error.message);
             if (this.onerror) {
-                this.onerror({ error: error.message });
+                this.onerror({ error });
             }
         }
     }
 
     stop() {
-        if (this.recognizer && this.isRecording) {
+        if (!this.recognizer) return;
+        
+        try {
             this.recognizer.stopContinuousRecognitionAsync(
                 () => {
-                    console.log('Azure recognition stopped');
+                    console.log('Recognition stopped');
                     this.isRecording = false;
-                    if (this.recognizer) {
-                        this.recognizer.close();
-                        this.recognizer = null;
-                    }
-                    if (this.onend) {
-                        this.onend();
-                    }
                 },
                 (err) => {
                     console.error('Error stopping recognition:', err);
                     this.isRecording = false;
-                    if (this.recognizer) {
-                        this.recognizer.close();
-                        this.recognizer = null;
-                    }
                 }
             );
+        } catch (error) {
+            console.error('Error in stop():', error);
+            this.isRecording = false;
         }
     }
 
     abort() {
-        this.stop();
+        if (!this.recognizer) return;
+        try {
+            this.recognizer.stopContinuousRecognitionAsync();
+            this.recognizer.close();
+        } catch (error) {
+            console.error('Error aborting:', error);
+        }
+        this.isRecording = false;
     }
 }
 
-// Check if Azure Speech SDK is available
-export function isAzureSpeechAvailable() {
-    return typeof window.SpeechSDK !== 'undefined';
+// Fallback Web Speech API Recognizer
+export class WebSpeechRecognizer {
+    constructor() {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            throw new Error('Web Speech API not supported');
+        }
+        
+        this.recognizer = new SpeechRecognition();
+        this.onstart = null;
+        this.onresult = null;
+        this.onerror = null;
+        this.onend = null;
+        this.isRecording = false;
+        
+        this.recognizer.continuous = true;
+        this.recognizer.interimResults = true;
+        this.recognizer.language = 'en-US';
+        
+        this.recognizer.onstart = () => {
+            this.isRecording = true;
+            console.log('Web Speech API recognition started');
+            if (this.onstart) this.onstart();
+        };
+        
+        this.recognizer.onresult = (event) => {
+            let interimTranscript = '';
+            let finalTranscript = '';
+            
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+                const transcript = event.results[i][0].transcript;
+                
+                if (event.results[i].isFinal) {
+                    finalTranscript += transcript + ' ';
+                } else {
+                    interimTranscript += transcript;
+                }
+            }
+            
+            // Emit final results
+            if (finalTranscript) {
+                if (this.onresult) {
+                    this.onresult({
+                        results: [{
+                            transcript: finalTranscript.trim(),
+                            isFinal: true
+                        }],
+                        resultIndex: 0
+                    });
+                }
+            } else if (interimTranscript) {
+                // Emit interim results
+                if (this.onresult) {
+                    this.onresult({
+                        results: [{
+                            transcript: interimTranscript,
+                            isFinal: false
+                        }],
+                        resultIndex: 0
+                    });
+                }
+            }
+        };
+        
+        this.recognizer.onerror = (event) => {
+            console.error('Web Speech API error:', event.error);
+            if (this.onerror) {
+                this.onerror({ error: event.error });
+            }
+        };
+        
+        this.recognizer.onend = () => {
+            this.isRecording = false;
+            console.log('Web Speech API recognition ended');
+            if (this.onend) this.onend();
+        };
+    }
+    
+    start() {
+        try {
+            this.recognizer.start();
+        } catch (error) {
+            console.error('Error starting Web Speech API:', error);
+            if (this.onerror) this.onerror({ error });
+        }
+    }
+    
+    stop() {
+        try {
+            this.recognizer.stop();
+        } catch (error) {
+            console.error('Error stopping Web Speech API:', error);
+        }
+    }
+    
+    abort() {
+        try {
+            this.recognizer.abort();
+        } catch (error) {
+            console.error('Error aborting Web Speech API:', error);
+        }
+    }
 }
 
-// Fallback to webkit if Azure not available
-export function createSpeechRecognizer() {
-    if (isAzureSpeechAvailable()) {
-        console.log('Using Azure Speech Recognition');
-        return new AzureSpeechRecognizer();
-    } else if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-        console.log('Using WebKit Speech Recognition (fallback)');
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        const recognition = new SpeechRecognition();
-        recognition.continuous = true;
-        recognition.interimResults = true;
-        recognition.lang = 'en-US';
-        return recognition;
+function isAzureSpeechAvailable() {
+    return !!window.SpeechSDK;
+}
+
+// Create recognizer based on provider choice (no automatic fallback)
+export function createSpeechRecognizer(forceWebSpeech = false) {
+    if (forceWebSpeech) {
+        // Web Speech API explicitly requested
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+            console.log('Using Web Speech API (requested)');
+            return new WebSpeechRecognizer();
+        } else {
+            throw new Error('Web Speech API not available in this browser');
+        }
     } else {
-        throw new Error('No speech recognition available');
+        // Azure Speech requested - no fallback
+        if (isAzureSpeechAvailable()) {
+            console.log('Using Azure Speech Recognition');
+            return new AzureSpeechRecognizer();
+        } else {
+            throw new Error('Azure Speech SDK not available. Please load the SDK or switch to Web Speech API.');
+        }
     }
 }
 
@@ -249,8 +360,9 @@ export async function speakText(text, voiceName = 'en-US-JennyNeural') {
             
             // Estimate audio duration: ~80ms per character (typical speech rate ~150 WPM = 2.5 words/sec)
             // Average word length is 5 chars, so: (text.length / 5 chars/word) / 2.5 words/sec * 1000 ms/sec = text.length * 80 ms
-            const estimatedDurationMs = Math.max(text.length * 80, 200); // At least 200ms
-            console.log(`Estimated audio duration: ${estimatedDurationMs}ms for text length: ${text.length} chars`);
+            // Add 500ms buffer to ensure audio finishes playing before transitioning
+            const estimatedDurationMs = Math.max(text.length * 80, 1500); // At least 1.5 seconds to ensure audio plays
+            console.log(`Estimated audio duration: ${estimatedDurationMs}ms for text length: ${text.length} chars, text: "${text.substring(0, 50)}..."`);
             
             // Speak the text
             synthesizer.speakTextAsync(
@@ -258,11 +370,14 @@ export async function speakText(text, voiceName = 'en-US-JennyNeural') {
                 result => {
                     if (result.reason === SpeechSDK.ResultReason.SynthesizingAudioCompleted) {
                         audioPlaybackStarted = true;
-                        console.log('Speech synthesis completed, waiting for audio playback...');
+                        console.log(`Speech synthesis completed, will wait ${estimatedDurationMs}ms before transitioning...`);
                         
                         // Wait for estimated audio duration to ensure audio has played
+                        // Use a timeout to guarantee we wait long enough for playback to finish
+                        const startTime = Date.now();
                         setTimeout(() => {
-                            console.log('Audio playback complete, resolving');
+                            const elapsedTime = Date.now() - startTime;
+                            console.log(`Audio playback timeout complete after ${elapsedTime}ms, resolving`);
                             synthesizer.close();
                             if (currentSynthesizer === synthesizer) {
                                 currentSynthesizer = null;

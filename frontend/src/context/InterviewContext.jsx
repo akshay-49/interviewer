@@ -13,6 +13,7 @@ export const useInterview = () => {
 
 export const InterviewProvider = ({ children }) => {
     const [currentScreen, setCurrentScreen] = useState('login');
+    const [currentParams, setCurrentParams] = useState(null);
     const [backendAvailable, setBackendAvailable] = useState(false);
     const stopRecordingCallbackRef = useRef(null);
 
@@ -45,6 +46,11 @@ export const InterviewProvider = ({ children }) => {
 
     const [interview, setInterview] = useState({
         sessionId: null,
+        userId: null,
+        userEmail: null,
+        userName: null,
+        jobTitle: null,
+        companyName: null,
         role: null,
         roleDisplay: '',
         persona: 'strict',
@@ -62,6 +68,7 @@ export const InterviewProvider = ({ children }) => {
         hintsUsed: 0,
         questionsSkipped: 0,
         questionWiseFeedback: [],
+        startedAt: null,
     });
 
     // Check backend availability on mount
@@ -77,8 +84,10 @@ export const InterviewProvider = ({ children }) => {
     useEffect(() => {
         const handlePopState = (event) => {
             const screen = event.state?.screen || 'login';
+            const params = event.state?.params || null;
             stopAudioPlayback();
             setCurrentScreen(screen);
+            setCurrentParams(params);
         };
 
         window.addEventListener('popstate', handlePopState);
@@ -87,10 +96,10 @@ export const InterviewProvider = ({ children }) => {
 
     // Push state to history when currentScreen changes
     useEffect(() => {
-        const state = { screen: currentScreen };
+        const state = { screen: currentScreen, params: currentParams };
         const title = currentScreen.charAt(0).toUpperCase() + currentScreen.slice(1);
         window.history.pushState(state, title);
-    }, [currentScreen]);
+    }, [currentScreen, currentParams]);
 
     const updateInterview = (updates) => {
         setInterview(prev => ({ ...prev, ...updates }));
@@ -103,6 +112,11 @@ export const InterviewProvider = ({ children }) => {
     const resetInterview = () => {
         setInterview({
             sessionId: null,
+            userId: null,
+            userEmail: null,
+            userName: null,
+            jobTitle: null,
+            companyName: null,
             role: null,
             roleDisplay: '',
             persona: 'strict',
@@ -120,6 +134,7 @@ export const InterviewProvider = ({ children }) => {
             hintsUsed: 0,
             questionsSkipped: 0,
             questionWiseFeedback: [],
+            startedAt: null,
         });
     };
 
@@ -127,7 +142,7 @@ export const InterviewProvider = ({ children }) => {
         setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
     };
 
-    const navigateTo = (screen, replaceHistory = false) => {
+    const navigateTo = (screen, params = null, replaceHistory = false) => {
         // Stop recording if we're leaving the interview screen
         if (screen !== 'interview' && stopRecordingCallbackRef.current) {
             console.log('Navigating away from interview, stopping recording');
@@ -137,8 +152,9 @@ export const InterviewProvider = ({ children }) => {
         stopAudioPlayback();
         
         setCurrentScreen(screen);
+        setCurrentParams(params);
         
-        const state = { screen };
+        const state = { screen, params };
         const title = screen.charAt(0).toUpperCase() + screen.slice(1);
         
         if (replaceHistory) {
@@ -152,6 +168,7 @@ export const InterviewProvider = ({ children }) => {
 
     const value = {
         currentScreen,
+        currentParams,
         backendAvailable,
         interview,
         updateInterview,

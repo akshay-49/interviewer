@@ -50,8 +50,7 @@ const ProfileMenu = () => {
 
     const handleProfile = () => {
         setIsOpen(false);
-        // TODO: Navigate to profile page once implemented
-        console.log('Profile clicked - feature coming soon');
+        navigateTo('profile');
     };
 
     const handleHistory = () => {

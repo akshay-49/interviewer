@@ -1,8 +1,12 @@
 from fastapi import FastAPI, HTTPException, File, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Dict, List, Any
 from uuid import uuid4
+
+# Pydantic Models for Request Bodies
+class DeleteMultipleQuestionsRequest(BaseModel):
+    question_ids: List[str]
 from langgraph.types import Command
 import base64
 import os
@@ -636,3 +640,1151 @@ def get_hint(req: HintRequest):
         "hint": hint_text,
         "persona": persona,
     }
+
+# --------------------------------------------------
+# Save Session Results to Cosmos DB
+# --------------------------------------------------
+
+class SaveSessionResultsRequest(BaseModel):
+    session_id: str
+    user_id: str
+    user_email: str
+    user_name: Optional[str] = None
+    job_title: Optional[str] = None
+    company_name: Optional[str] = None
+    summary: Dict[str, Any]
+    overall_score: float
+    hints_used: int
+    questions_skipped: int
+    total_questions: Optional[int] = None
+    answers: Optional[List[Dict[str, Any]]] = None
+    question_wise_feedback: List[Dict[str, Any]]  # All Q&A with evaluations
+    duration_seconds: Optional[int] = None
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+
+
+@app.post("/session/save-results")
+def save_session_results(req: SaveSessionResultsRequest):
+    """Save complete interview session results to Cosmos DB"""
+    logger.info(f"Saving session results: session={req.session_id}, user={req.user_id}")
+    
+    try:
+        from backend.core.cosmos import sessions_container, serialize_for_cosmos
+        from datetime import datetime
+        
+        # Build the session document
+        session_doc = {
+            "id": req.session_id,  # Cosmos DB requires 'id' field
+            "session_id": req.session_id,
+            "user_id": req.user_id,
+            "user_email": req.user_email,
+            "user_name": req.user_name,
+            "job_title": req.job_title,
+            "company_name": req.company_name,
+            "summary": req.summary,
+            "overall_score": req.overall_score,
+            "hints_used": req.hints_used,
+            "questions_skipped": req.questions_skipped,
+            "total_questions": req.total_questions,
+            "answers": req.answers or [],
+            "question_wise_feedback": req.question_wise_feedback,
+            "duration_seconds": req.duration_seconds,
+            "started_at": req.started_at,
+            "completed_at": req.completed_at or datetime.utcnow().isoformat(),
+        }
+        
+        # Serialize all datetime and complex objects
+        serialized_doc = serialize_for_cosmos(session_doc)
+        
+        # Save to Cosmos DB
+        sessions_container.upsert_item(serialized_doc)
+        logger.info(f"Successfully saved session {req.session_id} to Cosmos DB")
+        
+        return {
+            "success": True,
+            "session_id": req.session_id,
+            "message": "Session results saved successfully"
+        }
+    except Exception as e:
+        logger.error(f"Error saving session results: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save session results: {str(e)}")
+
+
+# --------------------------------------------------
+# Get User Session History from Cosmos DB
+# --------------------------------------------------
+
+class GetUserHistoryRequest(BaseModel):
+    user_id: str
+
+
+@app.post("/session/user-history")
+def get_user_history(req: GetUserHistoryRequest):
+    """Get all session history for a user from Cosmos DB"""
+    logger.info(f"Fetching history for user={req.user_id}")
+    
+    try:
+        from backend.core.cosmos import sessions_container
+        
+        # Query sessions for this user
+        query = """
+            SELECT * FROM sessions 
+            WHERE sessions.user_id = @user_id 
+            ORDER BY sessions.completed_at DESC
+        """
+        
+        items = list(sessions_container.query_items(
+            query=query,
+            parameters=[{"name": "@user_id", "value": req.user_id}],
+            max_item_count=50
+        ))
+        
+        logger.info(f"Found {len(items)} sessions for user {req.user_id}")
+        return {
+            "success": True,
+            "user_id": req.user_id,
+            "sessions": items
+        }
+    except Exception as e:
+        logger.error(f"Error fetching user history: {e}")
+        # Return empty array instead of error to avoid breaking UI
+        return {
+            "success": False,
+            "user_id": req.user_id,
+            "sessions": [],
+            "error": str(e)
+        }
+
+
+# --------------------------------------------------
+# User Profile Management
+# --------------------------------------------------
+
+class SaveUserProfileRequest(BaseModel):
+    user_id: str
+    user_name: str
+    user_email: Optional[str] = None
+    job_title: Optional[str] = None
+    company_name: Optional[str] = None
+    experience_level: Optional[str] = None
+
+
+@app.post("/user/save-profile")
+def save_user_profile(req: SaveUserProfileRequest):
+    """Save or update user profile in Cosmos DB"""
+    logger.info(f"Saving profile for user={req.user_id}")
+    
+    try:
+        from backend.core.cosmos import users_container, serialize_for_cosmos
+        from datetime import datetime
+        
+        # Build user profile document
+        user_doc = {
+            "id": req.user_id,  # Cosmos DB requires 'id' field
+            "user_id": req.user_id,
+            "user_name": req.user_name,
+            "user_email": req.user_email,
+            "job_title": req.job_title,
+            "company_name": req.company_name,
+            "experience_level": req.experience_level,
+            "updated_at": datetime.utcnow().isoformat()
+        }
+        
+        # Serialize for Cosmos
+        serialized_doc = serialize_for_cosmos(user_doc)
+        
+        # Upsert to Cosmos DB (creates or updates)
+        users_container.upsert_item(serialized_doc)
+        logger.info(f"Successfully saved profile for user {req.user_id}")
+        
+        return {
+            "success": True,
+            "user_id": req.user_id,
+            "message": "Profile saved successfully"
+        }
+    except Exception as e:
+        logger.error(f"Error saving user profile: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save profile: {str(e)}")
+
+
+class GetUserProfileRequest(BaseModel):
+    user_id: str
+
+
+@app.post("/user/get-profile")
+def get_user_profile(req: GetUserProfileRequest):
+    """Get user profile from Cosmos DB"""
+    logger.info(f"Fetching profile for user={req.user_id}")
+    
+    try:
+        from backend.core.cosmos import users_container
+        
+        # Query for user profile
+        query = "SELECT * FROM users WHERE users.user_id = @user_id"
+        
+        items = list(users_container.query_items(
+            query=query,
+            parameters=[{"name": "@user_id", "value": req.user_id}],
+            max_item_count=1
+        ))
+        
+        if items:
+            logger.info(f"Found profile for user {req.user_id}")
+            return {
+                "success": True,
+                "profile": items[0]
+            }
+        else:
+            logger.info(f"No profile found for user {req.user_id}")
+            return {
+                "success": False,
+                "profile": None,
+                "message": "Profile not found"
+            }
+    except Exception as e:
+        logger.error(f"Error fetching user profile: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch profile: {str(e)}")
+
+
+@app.get("/admin/users-cosmos")
+def get_all_users_from_cosmos():
+    """Get all users from Cosmos DB (for admin dashboard - no auth for testing)"""
+    logger.info("Fetching all users from Cosmos DB")
+    
+    try:
+        from backend.core.cosmos import users_container
+        
+        # Query for all users
+        query = "SELECT * FROM users"
+        
+        items = list(users_container.query_items(
+            query=query,
+            enable_cross_partition_query=True
+        ))
+        
+        logger.info(f"Found {len(items)} users in Cosmos DB")
+        
+        # Transform to match expected format
+        users = []
+        for item in items:
+            # Convert Cosmos _ts (seconds since epoch) to ISO string
+            created_at = None
+            if "_ts" in item:
+                try:
+                    from datetime import datetime
+                    created_at = datetime.fromtimestamp(item["_ts"]).isoformat()
+                except:
+                    created_at = None
+            
+            users.append({
+                "id": item.get("user_id"),
+                "email": item.get("user_email"),
+                "full_name": item.get("user_name"),
+                "is_active": item.get("is_active", True),
+                "is_admin": item.get("is_admin", item.get("user_email", "").endswith("@accellor.com")),
+                "auth_provider": item.get("auth_provider", "auth0"),
+                "created_at": created_at,
+                "job_title": item.get("job_title"),
+                "company_name": item.get("company_name"),
+                "experience_level": item.get("experience_level")
+            })
+        
+        return {
+            "success": True,
+            "users": users
+        }
+    except Exception as e:
+        logger.error(f"Error fetching users from Cosmos: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch users: {str(e)}")
+
+@app.post("/admin/update-user-admin")
+def update_user_admin_status(req: dict):
+    """Toggle admin status for a user in Cosmos DB"""
+    user_id = req.get("user_id")
+    is_admin = req.get("is_admin")
+    
+    logger.info(f"Updating admin status for user {user_id} to {is_admin}")
+    
+    try:
+        from backend.core.cosmos import users_container
+        
+        # Get existing user
+        query = "SELECT * FROM users WHERE users.user_id = @user_id"
+        items = list(users_container.query_items(
+            query=query,
+            parameters=[{"name": "@user_id", "value": user_id}],
+            max_item_count=1
+        ))
+        
+        if not items:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        user = items[0]
+        user["is_admin"] = is_admin
+        
+        # Update in Cosmos
+        users_container.upsert_item(user)
+        
+        logger.info(f"Successfully updated admin status for user {user_id}")
+        return {"success": True, "message": "Admin status updated"}
+    except Exception as e:
+        logger.error(f"Error updating admin status: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update: {str(e)}")
+
+
+@app.post("/admin/update-user-active")
+def update_user_active_status(req: dict):
+    """Toggle active status for a user in Cosmos DB"""
+    user_id = req.get("user_id")
+    is_active = req.get("is_active")
+    
+    logger.info(f"Updating active status for user {user_id} to {is_active}")
+    
+    try:
+        from backend.core.cosmos import users_container
+        
+        # Get existing user
+        query = "SELECT * FROM users WHERE users.user_id = @user_id"
+        items = list(users_container.query_items(
+            query=query,
+            parameters=[{"name": "@user_id", "value": user_id}],
+            max_item_count=1
+        ))
+        
+        if not items:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        user = items[0]
+        user["is_active"] = is_active
+        
+        # Update in Cosmos
+        users_container.upsert_item(user)
+        
+        logger.info(f"Successfully updated active status for user {user_id}")
+        return {"success": True, "message": "Active status updated"}
+    except Exception as e:
+        logger.error(f"Error updating active status: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update: {str(e)}")
+
+
+@app.post("/admin/send-invite")
+def send_invite(req: dict):
+    """Send interview invite to a candidate and create user in Cosmos DB"""
+    candidate_name = req.get("fullName")
+    candidate_email = req.get("email")
+    role = req.get("role", "")
+    seniority_level = req.get("seniorityLevel", "Senior")
+    job_description = req.get("jobDescription", "")
+    
+    if not candidate_name or not candidate_email:
+        raise HTTPException(status_code=400, detail="Name and email are required")
+    
+    try:
+        from backend.core.cosmos import client
+        import secrets
+        import requests
+        from backend.core.config import MAILERSEND_API_KEY
+        from azure.cosmos.partition_key import PartitionKey
+        
+        logger.info(f"DEBUG: MAILERSEND_API_KEY = {MAILERSEND_API_KEY[:20] if MAILERSEND_API_KEY else 'NOT SET'}...")
+        
+        # Get database
+        db = client.get_database_client("interviewer")
+        
+        # Get or create invites container
+        try:
+            invites_container = db.get_container_client("invites")
+        except Exception:
+            invites_container = db.create_container(
+                id="invites",
+                partition_key=PartitionKey(path="/invite_code")
+            )
+        
+        # Get users container
+        try:
+            users_container = db.get_container_client("users")
+        except Exception:
+            users_container = db.create_container(
+                id="users",
+                partition_key=PartitionKey(path="/user_id")
+            )
+        
+        # Generate unique invite code
+        invite_code = secrets.token_urlsafe(32)
+        user_id = str(uuid4())
+        
+        # Create user record in Cosmos DB users container
+        user_doc = {
+            "id": user_id,
+            "user_id": user_id,
+            "name": candidate_name,
+            "email": candidate_email,
+            "role": role,
+            "seniority_level": seniority_level,
+            "job_description": job_description,
+            "created_at": datetime.utcnow().isoformat(),
+            "invite_code": invite_code,
+            "invite_status": "sent",  # sent, pending, completed
+            "interview_completed": False,
+            "invited_by_admin": True
+        }
+        users_container.create_item(user_doc)
+        
+        # Store invite record in invites container (for tracking)
+        invite_doc = {
+            "id": str(uuid4()),
+            "invite_code": invite_code,
+            "user_id": user_id,
+            "candidate_name": candidate_name,
+            "candidate_email": candidate_email,
+            "role": role,
+            "seniority_level": seniority_level,
+            "job_description": job_description,
+            "created_at": datetime.utcnow().isoformat(),
+            "status": "sent",  # sent, pending, completed
+            "interview_completed": False
+        }
+        invites_container.create_item(invite_doc)
+        
+        # Generate invite link
+        invite_link = f"http://localhost:5173/invite/{invite_code}"
+        
+        # Send email using MailerSend (if API key is configured)
+        if MAILERSEND_API_KEY:
+            logger.info(f"MailerSend API key found. Sending email to {candidate_email}")
+            email_html = f"""<!DOCTYPE html>
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Interview Invitation - Accellor</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {{
+            darkMode: "class",
+            theme: {{
+                extend: {{
+                    colors: {{
+                        "primary": "#14b8a6",
+                        "background-light": "#f6f8f8",
+                        "background-dark": "#101f22",
+                    }},
+                    fontFamily: {{
+                        "display": ["Manrope", "sans-serif"]
+                    }},
+                }},
+            }},
+        }}
+    </script>
+<style>
+        body {{
+            font-family: 'Manrope', sans-serif;
+        }}
+        .material-symbols-outlined {{
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }}
+    </style>
+</head>
+<body class="bg-background-light min-h-screen font-display">
+<!-- Top Navigation Bar -->
+<header class="flex items-center justify-between border-b border-solid border-[#e7f1f3] bg-white px-6 md:px-20 py-4">
+<div class="flex items-center gap-4 text-[#0d191b]">
+<h2 class="text-xl font-bold leading-tight">Accellor</h2>
+</div>
+</header>
+<main class="max-w-[960px] mx-auto px-4 py-10 flex flex-col gap-8">
+<!-- Header Image / Hero Area -->
+<div class="w-full bg-center bg-no-repeat bg-cover flex flex-col justify-end overflow-hidden rounded-xl min-h-[240px] relative shadow-lg" style='background: linear-gradient(135deg, #14b8a6 0%, #0d9488 100%);'>
+<div class="p-8">
+<span class="inline-block px-3 py-1 bg-white text-[#0d9488] text-xs font-bold uppercase tracking-wider rounded-full mb-2">Invitation Confirmed</span>
+</div>
+</div>
+<!-- Page Heading -->
+<div class="flex flex-col gap-3">
+<h1 class="text-[#0d191b] text-4xl font-black leading-tight tracking-[-0.033em]">
+You've been invited to take an interview
+            </h1>
+<p class="text-[#4c8e9a] text-lg font-medium">{seniority_level} Position at Accellor</p>
+</div>
+<!-- Interview Format Breakdown -->
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+<div class="flex flex-1 gap-4 rounded-xl border border-[#cfe4e7] bg-white p-5 flex-col shadow-sm">
+<span class="material-symbols-outlined text-primary text-3xl">mic</span>
+<div class="flex flex-col gap-1">
+<h2 class="text-[#0d191b] text-base font-bold leading-tight">Type</h2>
+<p class="text-[#4c8e9a] text-sm font-normal leading-normal">Voice Interview</p>
+</div>
+</div>
+<div class="flex flex-1 gap-4 rounded-xl border border-[#cfe4e7] bg-white p-5 flex-col shadow-sm">
+<span class="material-symbols-outlined text-primary text-3xl">leaderboard</span>
+<div class="flex flex-col gap-1">
+<h2 class="text-[#0d191b] text-base font-bold leading-tight">Level</h2>
+<p class="text-[#4c8e9a] text-sm font-normal leading-normal">{seniority_level} Role</p>
+</div>
+</div>
+<div class="flex flex-1 gap-4 rounded-xl border border-[#cfe4e7] bg-white p-5 flex-col shadow-sm">
+<span class="material-symbols-outlined text-primary text-3xl">schedule</span>
+<div class="flex flex-col gap-1">
+<h2 class="text-[#0d191b] text-base font-bold leading-tight">Duration</h2>
+<p class="text-[#4c8e9a] text-sm font-normal leading-normal">~20 minutes</p>
+</div>
+</div>
+</div>
+<!-- Job Description -->
+{f'<div class="bg-white rounded-xl border border-[#cfe4e7] p-6 md:p-8 flex flex-col gap-4"><h2 class="text-[#0d191b] text-2xl font-bold">Position Details</h2><p class="text-[#4c8e9a] whitespace-pre-wrap">{job_description}</p></div>' if job_description else ''}
+<!-- Preparation Section -->
+<div class="bg-white rounded-xl border border-[#cfe4e7] p-6 md:p-8 flex flex-col gap-6">
+<div>
+<h2 class="text-[#0d191b] text-2xl font-bold leading-tight">Before you start</h2>
+<p class="text-gray-500 mt-1">Please ensure your environment is set up for the best experience.</p>
+</div>
+<div class="space-y-4">
+<div class="flex items-start gap-4">
+<div class="flex-shrink-0 size-6 flex items-center justify-center rounded-full bg-primary/10 text-primary mt-1">
+<span class="material-symbols-outlined text-lg">check_circle</span>
+</div>
+<div>
+<p class="text-[#0d191b] font-semibold">Microphone Access</p>
+<p class="text-gray-500 text-sm leading-relaxed">Ensure your browser has permission to access your microphone.</p>
+</div>
+</div>
+<div class="flex items-start gap-4">
+<div class="flex-shrink-0 size-6 flex items-center justify-center rounded-full bg-primary/10 text-primary mt-1">
+<span class="material-symbols-outlined text-lg">check_circle</span>
+</div>
+<div>
+<p class="text-[#0d191b] font-semibold">Quiet Environment</p>
+<p class="text-gray-500 text-sm leading-relaxed">Find a space with minimal background noise to ensure your voice is captured clearly.</p>
+</div>
+</div>
+<div class="flex items-start gap-4">
+<div class="flex-shrink-0 size-6 flex items-center justify-center rounded-full bg-primary/10 text-primary mt-1">
+<span class="material-symbols-outlined text-lg">check_circle</span>
+</div>
+<div>
+<p class="text-[#0d191b] font-semibold">Stable Internet</p>
+<p class="text-gray-500 text-sm leading-relaxed">A consistent connection is required to process your responses in real-time.</p>
+</div>
+</div>
+</div>
+<div class="bg-[#f0fdff] rounded-lg p-4 border-l-4 border-primary">
+<div class="flex gap-3">
+<span class="material-symbols-outlined text-primary">record_voice_over</span>
+<p class="text-[#0d191b] text-sm italic">
+                        "This is a voice-first experience. You will be asked questions by our AI agent and you must answer by speaking aloud."
+                    </p>
+</div>
+</div>
+</div>
+<!-- CTA Section -->
+<div class="flex flex-col items-center gap-4 py-6">
+<a href="{invite_link}" style="display: inline-block; width: 100%; max-width: 320px; padding: 16px 40px; background-color: #14b8a6; color: #0d191b; text-align: center; font-size: 18px; font-weight: 900; border-radius: 12px; text-decoration: none; box-shadow: 0 10px 25px rgba(20, 184, 166, 0.3); transition: all 0.3s ease;">
+Get Started
+            </a>
+<p class="text-gray-400 text-xs">By clicking "Get Started", you agree to our Terms of Service and Privacy Policy.</p>
+</div>
+</main>
+<!-- Footer -->
+<footer class="max-w-[960px] mx-auto px-4 pb-12 pt-6 border-t border-gray-100 flex justify-between items-center text-sm text-gray-400">
+<p>© 2024 Accellor. All rights reserved.</p>
+</footer>
+</body></html>
+"""
+            
+            email_payload = {
+                "from": {
+                    "email": "noreply@test-zkq340eorn0gd796.mlsender.net",
+                    "name": "Accellor"
+                },
+                "to": [
+                    {
+                        "email": candidate_email,
+                        "name": candidate_name
+                    }
+                ],
+                "subject": f"You're invited for a {seniority_level} interview at Accellor",
+                "html": email_html
+            }
+            
+            headers = {
+                "Authorization": f"Bearer {MAILERSEND_API_KEY}",
+                "Content-Type": "application/json"
+            }
+            
+            response = requests.post(
+                "https://api.mailersend.com/v1/email",
+                json=email_payload,
+                headers=headers
+            )
+            
+            logger.info(f"MailerSend response status: {response.status_code}")
+            if response.status_code not in [200, 202]:
+                logger.error(f"MailerSend error: {response.text}")
+                raise Exception(f"Failed to send email: {response.text}")
+            
+            logger.info(f"✅ Invite email sent successfully to {candidate_email}")
+        else:
+            logger.warning(f"MailerSend API key not configured. Invite link: {invite_link}")
+        
+        return {
+            "success": True,
+            "message": f"Invitation sent to {candidate_email}",
+            "invite_code": invite_code,
+            "invite_link": invite_link
+        }
+    except Exception as e:
+        logger.error(f"Error sending invite: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to send invite: {str(e)}")
+
+
+@app.post("/admin/validate-invite")
+def validate_invite(req: dict):
+    """Validate invite code and return candidate details"""
+    invite_code = req.get("invite_code")
+    
+    if not invite_code:
+        raise HTTPException(status_code=400, detail="Invite code is required")
+    
+    try:
+        from backend.core.cosmos import client
+        from azure.cosmos.partition_key import PartitionKey
+        
+        # Get database
+        db = client.get_database_client("interviewer")
+        
+        # Get or create invites container
+        try:
+            invites_container = db.get_container_client("invites")
+        except Exception:
+            invites_container = db.create_container(
+                id="invites",
+                partition_key=PartitionKey(path="/invite_code")
+            )
+        
+        # Query for invite
+        query = "SELECT * FROM invites WHERE invites.invite_code = @code"
+        items = list(invites_container.query_items(
+            query=query,
+            parameters=[{"name": "@code", "value": invite_code}],
+            max_item_count=1
+        ))
+        
+        if not items:
+            raise HTTPException(status_code=404, detail="Invite not found or already used")
+        
+        invite = items[0]
+        
+        # Check if invite is still valid
+        if invite.get("status") == "used":
+            raise HTTPException(status_code=400, detail="This invite has already been used")
+        
+        if invite.get("status") == "expired":
+            raise HTTPException(status_code=400, detail="This invite has expired")
+        
+        return {
+            "success": True,
+            "invite": {
+                "candidate_name": invite.get("candidate_name"),
+                "candidate_email": invite.get("candidate_email"),
+                "seniority_level": invite.get("seniority_level"),
+                "job_description": invite.get("job_description"),
+                "invite_code": invite_code
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error validating invite: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to validate invite: {str(e)}")
+
+
+@app.get("/admin/get-invites")
+def get_invites():
+    """Get all invitations from Cosmos DB"""
+    try:
+        from backend.core.cosmos import client
+        from azure.cosmos.partition_key import PartitionKey
+        
+        # Get database
+        db = client.get_database_client("interviewer")
+        
+        # Get or create invites container
+        try:
+            invites_container = db.get_container_client("invites")
+        except Exception:
+            invites_container = db.create_container(
+                id="invites",
+                partition_key=PartitionKey(path="/invite_code")
+            )
+        
+        # Query all invites ordered by creation date (newest first)
+        query = "SELECT * FROM invites ORDER BY invites.created_at DESC"
+        items = list(invites_container.query_items(query=query, enable_cross_partition_query=True))
+        
+        return {
+            "success": True,
+            "invites": items
+        }
+    except Exception as e:
+        logger.error(f"Error fetching invites: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch invites: {str(e)}")
+
+
+@app.delete("/admin/delete-invite/{invite_code}")
+def delete_invite(invite_code: str):
+    """Delete an invite and revoke user access"""
+    try:
+        from backend.core.cosmos import client
+        from azure.cosmos.partition_key import PartitionKey
+        
+        db = client.get_database_client("interviewer")
+        
+        # Get invites container
+        try:
+            invites_container = db.get_container_client("invites")
+        except Exception:
+            invites_container = db.create_container(
+                id="invites",
+                partition_key=PartitionKey(path="/invite_code")
+            )
+        
+        # Get users container
+        try:
+            users_container = db.get_container_client("users")
+        except Exception:
+            users_container = db.create_container(
+                id="users",
+                partition_key=PartitionKey(path="/user_id")
+            )
+        
+        # Find the invite to get user_id
+        query = "SELECT * FROM invites WHERE invites.invite_code = @code"
+        items = list(invites_container.query_items(
+            query=query,
+            parameters=[{"name": "@code", "value": invite_code}],
+            max_item_count=1,
+            enable_cross_partition_query=True
+        ))
+        
+        if not items:
+            raise HTTPException(status_code=404, detail="Invite not found")
+        
+        invite = items[0]
+        user_id = invite.get("user_id")
+        
+        # Delete from invites container
+        invites_container.delete_item(item=invite["id"], partition_key=invite.get("invite_code"))
+        
+        # Delete from users container if user_id exists
+        if user_id:
+            try:
+                user_query = "SELECT * FROM users WHERE users.user_id = @id"
+                user_items = list(users_container.query_items(
+                    query=user_query,
+                    parameters=[{"name": "@id", "value": user_id}],
+                    max_item_count=1,
+                    enable_cross_partition_query=True
+                ))
+                
+                if user_items:
+                    user = user_items[0]
+                    users_container.delete_item(item=user["id"], partition_key=user.get("user_id"))
+            except Exception as e:
+                logger.warning(f"Could not delete user record: {e}")
+        
+        return {
+            "success": True,
+            "message": f"Invite revoked and user access removed"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting invite: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete invite: {str(e)}")
+
+
+@app.post("/admin/toggle-access/{invite_code}")
+def toggle_access(invite_code: str, req: dict):
+    """Toggle access enabled/disabled for an invite"""
+    access_enabled = req.get("access_enabled", True)
+    
+    try:
+        from backend.core.cosmos import client
+        from azure.cosmos.partition_key import PartitionKey
+        
+        db = client.get_database_client("interviewer")
+        
+        # Get invites container
+        try:
+            invites_container = db.get_container_client("invites")
+        except Exception:
+            invites_container = db.create_container(
+                id="invites",
+                partition_key=PartitionKey(path="/invite_code")
+            )
+        
+        # Get users container
+        try:
+            users_container = db.get_container_client("users")
+        except Exception:
+            users_container = db.create_container(
+                id="users",
+                partition_key=PartitionKey(path="/user_id")
+            )
+        
+        # Find and update the invite
+        query = "SELECT * FROM invites WHERE invites.invite_code = @code"
+        items = list(invites_container.query_items(
+            query=query,
+            parameters=[{"name": "@code", "value": invite_code}],
+            max_item_count=1,
+            enable_cross_partition_query=True
+        ))
+        
+        if not items:
+            raise HTTPException(status_code=404, detail="Invite not found")
+        
+        invite = items[0]
+        invite["access_enabled"] = access_enabled
+        invites_container.replace_item(item=invite["id"], body=invite, partition_key=invite.get("invite_code"))
+        
+        # Also update user record if exists
+        user_id = invite.get("user_id")
+        if user_id:
+            try:
+                user_query = "SELECT * FROM users WHERE users.user_id = @id"
+                user_items = list(users_container.query_items(
+                    query=user_query,
+                    parameters=[{"name": "@id", "value": user_id}],
+                    max_item_count=1,
+                    enable_cross_partition_query=True
+                ))
+                
+                if user_items:
+                    user = user_items[0]
+                    user["access_enabled"] = access_enabled
+                    users_container.replace_item(item=user["id"], body=user, partition_key=user.get("user_id"))
+            except Exception as e:
+                logger.warning(f"Could not update user access status: {e}")
+        
+        return {
+            "success": True,
+            "message": f"Access {'enabled' if access_enabled else 'disabled'}",
+            "access_enabled": access_enabled
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error toggling access: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to toggle access: {str(e)}")
+
+
+# ============================================================================
+# QUESTIONS API ENDPOINTS
+# ============================================================================
+
+@app.get("/admin/get-questions")
+async def get_questions(
+    category: Optional[str] = None,
+    role: Optional[str] = None,
+    experience: Optional[str] = None,
+    limit: int = 100
+):
+    """
+    Fetch interview questions from Cosmos DB with optional filters.
+    
+    Parameters:
+    - category: Filter by category (Technical, Behavioral, Architecture, etc.)
+    - role: Filter by role (Frontend, Backend, DevOps, Data Science, All Roles)
+    - experience: Filter by experience (Intern, Junior, Mid-Level, Senior, Staff, Principal, Entry-level)
+    - limit: Maximum number of questions to return (default: 100)
+    """
+    try:
+        from backend.core.cosmos import questions_container
+        
+        # Build query dynamically based on filters
+        where_clauses = []
+        parameters = []
+        
+        if category:
+            where_clauses.append("c.category = @category")
+            parameters.append({"name": "@category", "value": category})
+        
+        if role:
+            where_clauses.append("c.role = @role")
+            parameters.append({"name": "@role", "value": role})
+        
+        if experience:
+            where_clauses.append("c.experience = @experience")
+            parameters.append({"name": "@experience", "value": experience})
+        
+        # Build the query
+        query = "SELECT * FROM questions c"
+        if where_clauses:
+            query += " WHERE " + " AND ".join(where_clauses)
+        query += " ORDER BY c.created_at DESC"
+        
+        # Execute query
+        items = list(questions_container.query_items(
+            query=query,
+            parameters=parameters,
+            enable_cross_partition_query=True
+        ))
+        
+        # Apply limit
+        items = items[:limit]
+        
+        # Backfill experience for older records
+        for item in items:
+            if "experience" not in item or not item.get("experience"):
+                item["experience"] = "Mid-Level"
+
+        logger.info(f"✅ Fetched {len(items)} questions (category={category}, role={role}, experience={experience})")
+        
+        return {
+            "success": True,
+            "questions": items,
+            "count": len(items)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching questions: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch questions: {str(e)}")
+
+
+@app.get("/admin/questions-stats")
+async def get_questions_stats():
+    """
+    Get statistics about stored interview questions.
+    Returns counts by category, role, and experience.
+    """
+    try:
+        from backend.core.cosmos import questions_container
+        
+        # Get total count
+        total_query = "SELECT VALUE COUNT(1) FROM questions c"
+        total_count = list(questions_container.query_items(
+            query=total_query,
+            enable_cross_partition_query=True
+        ))[0]
+        
+        # Get counts by category
+        category_query = "SELECT c.category, COUNT(1) as count FROM questions c GROUP BY c.category"
+        try:
+            categories = list(questions_container.query_items(
+                query=category_query,
+                enable_cross_partition_query=True
+            ))
+        except:
+            categories = []
+        
+        # Get counts by role
+        role_query = "SELECT c.role, COUNT(1) as count FROM questions c GROUP BY c.role"
+        try:
+            roles = list(questions_container.query_items(
+                query=role_query,
+                enable_cross_partition_query=True
+            ))
+        except:
+            roles = []
+        
+        # Get counts by experience
+        experience_query = "SELECT c.experience, COUNT(1) as count FROM questions c GROUP BY c.experience"
+        try:
+            experiences = list(questions_container.query_items(
+                query=experience_query,
+                enable_cross_partition_query=True
+            ))
+        except:
+            experiences = []
+        
+        return {
+            "success": True,
+            "total_questions": total_count,
+            "by_category": categories,
+            "by_role": roles,
+            "by_experience": experiences
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching question stats: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch stats: {str(e)}")
+
+
+@app.get("/admin/user-question-history/{user_id}")
+async def get_user_question_history(user_id: str):
+    """
+    Get all questions that have been asked to a specific user.
+    Shows which questions they've already been asked (to avoid repetition).
+    """
+    try:
+        from backend.core.cosmos import question_logs_container
+        
+        # Get all questions asked to this user
+        query = "SELECT * FROM question_logs c WHERE c.user_id = @user_id ORDER BY c.asked_at DESC"
+        items = list(question_logs_container.query_items(
+            query=query,
+            parameters=[{"name": "@user_id", "value": user_id}],
+            enable_cross_partition_query=False
+        ))
+        
+        # Get unique question IDs
+        unique_question_ids = set(item['question_id'] for item in items)
+        
+        logger.info(f"✅ Fetched question history for user {user_id}: {len(unique_question_ids)} unique questions")
+        
+        return {
+            "success": True,
+            "user_id": user_id,
+            "total_questions_asked": len(items),
+            "unique_questions": len(unique_question_ids),
+            "question_logs": items
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching user question history: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch history: {str(e)}")
+
+
+@app.get("/admin/question/{question_id}/usage")
+async def get_question_usage(question_id: str):
+    """
+    Get usage statistics for a specific question.
+    Shows how many users have been asked this question.
+    """
+    try:
+        from backend.core.cosmos import question_logs_container, questions_container
+        
+        # Get question details
+        try:
+            question = next(questions_container.query_items(
+                query="SELECT * FROM questions c WHERE c.id = @question_id",
+                parameters=[{"name": "@question_id", "value": question_id}],
+                enable_cross_partition_query=True
+            ), None)
+        except:
+            question = None
+        
+        # Get usage logs for this question
+        query = "SELECT * FROM question_logs c WHERE c.question_id = @question_id ORDER BY c.asked_at DESC"
+        items = list(question_logs_container.query_items(
+            query=query,
+            parameters=[{"name": "@question_id", "value": question_id}],
+            enable_cross_partition_query=True
+        ))
+        
+        # Calculate stats
+        total_asked = len(items)
+        answered = sum(1 for item in items if item.get('answered', False))
+        avg_score = sum(item.get('answer_score', 0) for item in items if item.get('answer_score')) / answered if answered > 0 else 0
+        
+        logger.info(f"✅ Question {question_id} has been asked {total_asked} times")
+        
+        return {
+            "success": True,
+            "question_id": question_id,
+            "question_text": question.get('text') if question else "N/A",
+            "total_times_asked": total_asked,
+            "times_answered": answered,
+            "average_score": avg_score,
+            "usage_logs": items
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching question usage: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch usage: {str(e)}")
+
+
+@app.delete("/admin/question/{question_id}")
+async def delete_question(question_id: str):
+    """
+    Delete a single question by ID.
+    """
+    try:
+        from backend.core.cosmos import questions_container
+        
+        # Delete the question from Cosmos DB
+        # First get it to find the partition key (category)
+        question = next(questions_container.query_items(
+            query="SELECT * FROM questions c WHERE c.id = @question_id",
+            parameters=[{"name": "@question_id", "value": question_id}],
+            enable_cross_partition_query=True
+        ), None)
+        
+        if not question:
+            raise HTTPException(status_code=404, detail=f"Question {question_id} not found")
+        
+        # Delete using partition key
+        questions_container.delete_item(item=question_id, partition_key=question.get('category'))
+        
+        logger.info(f"✅ Deleted question {question_id}")
+        
+        return {
+            "success": True,
+            "message": f"Question {question_id} deleted successfully",
+            "deleted_question_id": question_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting question: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete question: {str(e)}")
+
+
+@app.post("/admin/questions/delete-multiple")
+async def delete_multiple_questions(request: DeleteMultipleQuestionsRequest):
+    """
+    Delete multiple questions by their IDs.
+    """
+    question_ids = request.question_ids
+    if not question_ids:
+        raise HTTPException(status_code=400, detail="No questions to delete")
+    
+    try:
+        from backend.core.cosmos import questions_container
+        
+        deleted_count = 0
+        failed_ids = []
+        
+        for question_id in question_ids:
+            try:
+                # Get question to find partition key
+                question = next(questions_container.query_items(
+                    query="SELECT * FROM questions c WHERE c.id = @question_id",
+                    parameters=[{"name": "@question_id", "value": question_id}],
+                    enable_cross_partition_query=True
+                ), None)
+                
+                if question:
+                    questions_container.delete_item(item=question_id, partition_key=question.get('category'))
+                    deleted_count += 1
+                else:
+                    failed_ids.append(question_id)
+                    
+            except Exception as e:
+                logger.warning(f"Failed to delete question {question_id}: {e}")
+                failed_ids.append(question_id)
+        
+        logger.info(f"✅ Deleted {deleted_count} questions")
+        
+        return {
+            "success": True,
+            "deleted_count": deleted_count,
+            "failed_count": len(failed_ids),
+            "failed_ids": failed_ids,
+            "message": f"Successfully deleted {deleted_count} of {len(question_ids)} questions"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting multiple questions: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete questions: {str(e)}")

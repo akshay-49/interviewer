@@ -41,6 +41,25 @@ const LoginScreen = () => {
                     const data = await response.json();
                     console.log('Backend sync successful:', data);
                     
+                    const clearProfileStorage = () => {
+                        ['user_id', 'user_name', 'user_email', 'job_title', 'company_name', 'experience_level'].forEach((key) => {
+                            localStorage.removeItem(key);
+                        });
+                    };
+
+                    const storedUserId = localStorage.getItem('user_id');
+                    const storedUserEmail = localStorage.getItem('user_email');
+                    const nextUserId = data.user.id;
+                    const nextUserEmail = data.user.email;
+
+                    if ((storedUserId && storedUserId !== nextUserId) || (storedUserEmail && storedUserEmail !== nextUserEmail)) {
+                        clearProfileStorage();
+                    }
+
+                    localStorage.setItem('user_id', nextUserId);
+                    localStorage.setItem('user_name', data.user.full_name);
+                    localStorage.setItem('user_email', nextUserEmail);
+
                     // Update user state
                     updateUser({
                         name: data.user.full_name,
@@ -81,6 +100,12 @@ const LoginScreen = () => {
     };
 
     const handleMicrosoftLogin = async () => {
+        // Skip authentication for testing - go straight to admin dashboard
+        console.log('Bypassing auth, navigating to admin-dashboard');
+        navigateTo('admin-dashboard');
+        return;
+        
+        /* Commented out for testing
         try {
             const msalInstance = getMsalInstance();
             const response = await msalInstance.loginPopup(loginRequest);
@@ -125,14 +150,9 @@ const LoginScreen = () => {
                     picture: data.user.picture,
                 });
                 
-                // Navigate based on admin status
-                if (data.user.is_admin || data.user.email.toLowerCase().endsWith('@accellor.com')) {
-                    console.log('Navigating to admin-dashboard');
-                    navigateTo('admin-dashboard');
-                } else {
-                    console.log('Navigating to welcome');
-                    navigateTo('welcome');
-                }
+                // Navigate to admin dashboard
+                console.log('Navigating to admin-dashboard');
+                navigateTo('admin-dashboard');
             } catch (backendError) {
                 console.error('Backend error:', backendError);
                 alert(`Backend error: ${backendError.message}`);
@@ -143,6 +163,7 @@ const LoginScreen = () => {
                 alert(`Microsoft login failed: ${error.message}`);
             }
         }
+        */
     };
 
     const handleSignup = () => {

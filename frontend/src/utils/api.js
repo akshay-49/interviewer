@@ -207,8 +207,54 @@ export function stopAudioPlayback() {
     stopSpeechPlayback();
 }
 
-// History/Sessions API
 export const historyApi = {
+    // Save completed session results to Cosmos DB
+    async saveSessionResults(sessionData) {
+        try {
+            const response = await fetch(`${API_BASE_URL}/session/save-results`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
+                },
+                body: JSON.stringify(sessionData)
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            return await response.json();
+        } catch (error) {
+            console.error('Failed to save session results:', error);
+            throw error;
+        }
+    },
+
+    // Get user session history from Cosmos DB
+    async getUserHistory(userId) {
+        try {
+            const response = await fetch(`${API_BASE_URL}/session/user-history`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
+                },
+                body: JSON.stringify({ user_id: userId })
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            return data.sessions || [];
+        } catch (error) {
+            console.error('Failed to fetch user history:', error);
+            return [];
+        }
+    },
+
     // Get all sessions for current user
     async getUserSessions(limit = 50) {
         try {
@@ -231,6 +277,51 @@ export const historyApi = {
         } catch (error) {
             console.error('Failed to fetch user sessions:', error);
             throw error;
+        }
+    },
+
+    // Save user profile to Cosmos DB
+    async saveUserProfile(profileData) {
+        try {
+            const response = await fetch(`${API_BASE_URL}/user/save-profile`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(profileData)
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            return await response.json();
+        } catch (error) {
+            console.error('Failed to save user profile:', error);
+            throw error;
+        }
+    },
+
+    // Get user profile from Cosmos DB
+    async getUserProfile(userId) {
+        try {
+            const response = await fetch(`${API_BASE_URL}/user/get-profile`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ user_id: userId })
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            return data.profile || null;
+        } catch (error) {
+            console.error('Failed to fetch user profile:', error);
+            return null;
         }
     },
 

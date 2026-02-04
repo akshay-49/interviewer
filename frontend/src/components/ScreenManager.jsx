@@ -8,10 +8,12 @@ import WelcomeScreen from './screens/WelcomeScreen';
 import SetupScreen from './screens/SetupScreen';
 import InterviewScreen from './screens/InterviewScreen';
 import HistoryScreen from './screens/HistoryScreen';
+import ProfileScreen from './screens/ProfileScreen';
 import ResultsScreen from './screens/ResultsScreen';
 import ReportScreen from './screens/ReportScreen';
 import AdminDashboardScreen from './screens/AdminDashboardScreen';
 import InviteCandidateScreen from './screens/InviteCandidateScreen';
+import UserSessionsScreen from './screens/UserSessionsScreen';
 
 const ScreenManager = () => {
     const { currentScreen, theme, toggleTheme, navigateTo, interview, resetInterview } = useInterview();
@@ -32,6 +34,8 @@ const ScreenManager = () => {
                 return <InterviewScreen />;
             case 'history':
                 return <HistoryScreen />;
+            case 'profile':
+                return <ProfileScreen />;
             case 'report':
                 return <ReportScreen />;
             case 'results':
@@ -40,6 +44,8 @@ const ScreenManager = () => {
                 return <AdminDashboardScreen />;
             case 'invite-candidate':
                 return <InviteCandidateScreen />;
+            case 'user-sessions':
+                return <UserSessionsScreen />;
             default:
                 return <LoginScreen />;
         }
