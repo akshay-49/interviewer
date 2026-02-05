@@ -11,6 +11,7 @@ const InviteCandidateScreen = () => {
         jobDescription: ''
     });
     const [showSuccessToast, setShowSuccessToast] = useState(false);
+    const [toastMessage, setToastMessage] = useState({ title: '', subtitle: '' });
     const [invitations, setInvitations] = useState([]);
     const [loading, setLoading] = useState(true);
     const [stats, setStats] = useState({
@@ -73,6 +74,10 @@ const InviteCandidateScreen = () => {
             const data = await response.json();
             console.log('Invite sent:', data);
             
+            setToastMessage({ 
+                title: 'Invitation Sent!', 
+                subtitle: `Link created for ${formData.fullName || 'candidate'}.` 
+            });
             setShowSuccessToast(true);
             setTimeout(() => setShowSuccessToast(false), 5000);
             
@@ -139,6 +144,10 @@ const InviteCandidateScreen = () => {
             });
             
             if (response.ok) {
+                setToastMessage({ 
+                    title: 'Access Revoked!', 
+                    subtitle: `Invite for ${invite.candidate_name} has been deleted.` 
+                });
                 setShowSuccessToast(true);
                 setTimeout(() => setShowSuccessToast(false), 5000);
                 fetchInvitations();
@@ -152,82 +161,24 @@ const InviteCandidateScreen = () => {
     };
 
     return (
-        <div className="min-h-screen bg-[#f6f8f8]">
-            {/* Top Navigation Bar */}
-            <header className="sticky top-0 z-50 w-full border-b border-[#e7f1f3] bg-white px-4 md:px-10 py-3 shadow-sm">
-                <div className="max-w-[1600px] mx-auto flex items-center justify-between whitespace-nowrap">
-                    <div className="flex items-center gap-8">
-                        <div className="flex items-center gap-3">
-                            <img src="/accellor-logo.svg" alt="Accellor" className="h-8"/>
-                            <div className="h-6 w-px bg-[#e7f1f3]"></div>
-                            <h2 className="text-[#0d191b] text-lg font-bold">Admin Portal</h2>
-                        </div>
-                        <nav className="hidden md:flex items-center gap-6">
-                            <button 
-                                onClick={() => navigateTo('admin-dashboard')}
-                                className="text-sm font-semibold text-[#4c8e9a] hover:text-primary transition-colors"
-                            >
-                                Dashboard
-                            </button>
-                            <button 
-                                onClick={() => navigateTo('admin-dashboard')}
-                                className="text-sm font-semibold text-[#4c8e9a] hover:text-primary transition-colors"
-                            >
-                                Users
-                            </button>
-                            <button className="text-sm font-bold text-primary">
-                                Candidates
-                            </button>
-                            <button className="text-sm font-semibold text-[#4c8e9a] hover:text-primary transition-colors">
-                                Interviews
-                            </button>
-                            <button className="text-sm font-semibold text-[#4c8e9a] hover:text-primary transition-colors">
-                                Settings
-                            </button>
-                        </nav>
-                    </div>
-                    <div className="flex items-center gap-6">
-                        <div className="hidden lg:block">
-                            <label className="relative flex items-center w-64 h-10">
-                                <span className="absolute left-3 text-[#4c8e9a] material-symbols-outlined text-[20px]">search</span>
-                                <input 
-                                    className="w-full h-full pl-10 pr-4 rounded-lg border-none bg-[#e7f1f3] text-[#0d191b] placeholder:text-[#4c8e9a] text-sm focus:ring-2 focus:ring-primary" 
-                                    placeholder="Search candidates..." 
-                                    type="text"
-                                />
-                            </label>
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <button className="p-2 text-[#4c8e9a] hover:bg-[#e7f1f3] rounded-full transition-all">
-                                <span className="material-symbols-outlined">notifications</span>
-                            </button>
-                            <div 
-                                className="size-10 rounded-full bg-cover bg-center border-2 border-primary/20" 
-                                style={{backgroundImage: 'url("https://lh3.googleusercontent.com/aida-public/AB6AXuCebUrNZrJGf5OGI3kxMDy0XBDilXIii1RAE48Lha0yBw50-rD4BJW_5i3ZtkmD9TglLPbDx3w-CEuGku1jBqkBDN9QET0GOupnqKFKKcjhrLaqbkYu7IxsVhCbxooOU3sZ_cIbLT3-4lMbgQ5q-mWbniF_dipStb8OWPaTEYH8i5dATlQtWJ7wDi6O92aWQXRfk9x4Q5TCi4fL6r0yrfALusba4mdqNRiP12q4m2f8HGMsvSHk3_6WBkgLLax2SwThgxV9HtyjGJZ_")'}}
-                            ></div>
-                        </div>
-                    </div>
+        <>
+            {/* Page Heading */}
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
+                <div className="flex flex-col gap-1">
+                    <h1 className="text-[#0d191b] text-3xl font-black leading-tight tracking-tight">Candidate Invitations</h1>
+                    <p className="text-[#4c8e9a] text-base font-normal">Create new interview access and track current pending statuses.</p>
                 </div>
-            </header>
-
-            <main className="max-w-[1600px] mx-auto p-4 md:p-10">
-                {/* Page Heading */}
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
-                    <div className="flex flex-col gap-1">
-                        <h1 className="text-[#0d191b] text-3xl font-black leading-tight tracking-tight">Candidate Invitations</h1>
-                        <p className="text-[#4c8e9a] text-base font-normal">Create new interview access and track current pending statuses.</p>
-                    </div>
-                    <div className="flex gap-3">
-                        <button className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#e7f1f3] text-[#0d191b] text-sm font-bold hover:bg-[#d8e8eb] transition-all">
-                            <span className="material-symbols-outlined text-[18px]">analytics</span>
-                            View Analytics
-                        </button>
-                        <button className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary text-white text-sm font-bold hover:shadow-lg hover:shadow-primary/30 transition-all">
-                            <span className="material-symbols-outlined text-[18px]">ios_share</span>
-                            Export CSV
-                        </button>
-                    </div>
+                <div className="flex gap-3">
+                    <button className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#e7f1f3] text-[#0d191b] text-sm font-bold hover:bg-[#d8e8eb] transition-all">
+                        <span className="material-symbols-outlined text-[18px]">analytics</span>
+                        View Analytics
+                    </button>
+                    <button className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary text-white text-sm font-bold hover:shadow-lg hover:shadow-primary/30 transition-all">
+                        <span className="material-symbols-outlined text-[18px]">ios_share</span>
+                        Export CSV
+                    </button>
                 </div>
+            </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
                     {/* Left Side: Invitation Form */}
@@ -448,7 +399,6 @@ const InviteCandidateScreen = () => {
                         </div>
                     </div>
                 </div>
-            </main>
 
             {/* Success Toast */}
             {showSuccessToast && (
@@ -457,8 +407,8 @@ const InviteCandidateScreen = () => {
                         <span className="material-symbols-outlined text-white">check</span>
                     </div>
                     <div>
-                        <p className="font-bold text-sm">Invitation Sent!</p>
-                        <p className="text-xs text-gray-400">Link created for {formData.fullName || 'candidate'}.</p>
+                        <p className="font-bold text-sm">{toastMessage.title}</p>
+                        <p className="text-xs text-gray-400">{toastMessage.subtitle}</p>
                     </div>
                     <button 
                         className="ml-4 text-gray-400 hover:text-white"
@@ -468,7 +418,7 @@ const InviteCandidateScreen = () => {
                     </button>
                 </div>
             )}
-        </div>
+        </>
     );
 };
 

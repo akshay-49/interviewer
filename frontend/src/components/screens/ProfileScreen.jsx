@@ -1,11 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useInterview } from '../../context/InterviewContext';
 import { historyApi } from '../../utils/api';
-import { useAuth0 } from '@auth0/auth0-react';
 
 const ProfileScreen = () => {
-    const { navigateTo, theme } = useInterview();
-    const { user: auth0User } = useAuth0();
+    const { navigateTo, theme, user: contextUser } = useInterview();
     const [formData, setFormData] = useState({
         user_id: '',
         user_name: '',
@@ -38,7 +36,7 @@ const ProfileScreen = () => {
                     const profileData = {
                         user_id: profile.user_id,
                         user_name: profile.user_name || '',
-                        user_email: profile.user_email || auth0User?.email || '',
+                        user_email: profile.user_email || '',
                         job_title: profile.job_title || '',
                         company_name: profile.company_name || '',
                         experience_level: profile.experience_level || ''
@@ -67,10 +65,20 @@ const ProfileScreen = () => {
     };
 
     const loadFromLocalStorage = () => {
+        const storedEmail = localStorage.getItem('user_email');
+        const contextEmail = contextUser?.email;
+        
+        // If stored email exists and differs from context email, clear storage
+        if (contextEmail && storedEmail && storedEmail !== contextEmail) {
+            ['user_id', 'user_name', 'user_email', 'job_title', 'company_name', 'experience_level'].forEach((key) => {
+                localStorage.removeItem(key);
+            });
+        }
+        
         const savedData = {
             user_id: localStorage.getItem('user_id') || '',
-            user_name: localStorage.getItem('user_name') || '',
-            user_email: localStorage.getItem('user_email') || auth0User?.email || '',
+            user_name: localStorage.getItem('user_name') || contextUser?.name || '',
+            user_email: localStorage.getItem('user_email') || contextUser?.email || '',
             job_title: localStorage.getItem('job_title') || '',
             company_name: localStorage.getItem('company_name') || '',
             experience_level: localStorage.getItem('experience_level') || ''

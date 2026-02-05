@@ -31,6 +31,7 @@ from backend.interview.recording_routes import router as recording_router
 from backend.interview.history_routes import router as history_router
 from backend.core.cosmos import init_cosmos_db
 from backend.interview.enhanced_session_manager import SessionManager
+from backend.core.auth0_manager import Auth0Manager
 
 # Configure logging
 logging.basicConfig(
@@ -38,6 +39,11 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Disable Cosmos DB verbose logging
+logging.getLogger('azure.cosmos').setLevel(logging.WARNING)
+logging.getLogger('azure.identity').setLevel(logging.WARNING)
+logging.getLogger('urllib3').setLevel(logging.WARNING)
 
 # --------------------------------------------------
 # App
@@ -47,10 +53,10 @@ app = FastAPI(title="Voice Interview Backend")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:5173", "http://localhost:3000"],  # Specific origins for credentials
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 # Include authentication routes
@@ -983,11 +989,7 @@ def send_invite(req: dict):
     try:
         from backend.core.cosmos import client
         import secrets
-        import requests
-        from backend.core.config import MAILERSEND_API_KEY
         from azure.cosmos.partition_key import PartitionKey
-        
-        logger.info(f"DEBUG: MAILERSEND_API_KEY = {MAILERSEND_API_KEY[:20] if MAILERSEND_API_KEY else 'NOT SET'}...")
         
         # Get database
         db = client.get_database_client("interviewer")
@@ -1025,9 +1027,10 @@ def send_invite(req: dict):
             "job_description": job_description,
             "created_at": datetime.utcnow().isoformat(),
             "invite_code": invite_code,
-            "invite_status": "sent",  # sent, pending, completed
+            "invite_status": "sent",
             "interview_completed": False,
-            "invited_by_admin": True
+            "invited_by_admin": True,
+            "access_enabled": True
         }
         users_container.create_item(user_doc)
         
@@ -1042,200 +1045,30 @@ def send_invite(req: dict):
             "seniority_level": seniority_level,
             "job_description": job_description,
             "created_at": datetime.utcnow().isoformat(),
-            "status": "sent",  # sent, pending, completed
-            "interview_completed": False
+            "status": "sent",
+            "interview_completed": False,
+            "access_enabled": True
         }
         invites_container.create_item(invite_doc)
         
         # Generate invite link
         invite_link = f"http://localhost:5173/invite/{invite_code}"
         
-        # Send email using MailerSend (if API key is configured)
-        if MAILERSEND_API_KEY:
-            logger.info(f"MailerSend API key found. Sending email to {candidate_email}")
-            email_html = f"""<!DOCTYPE html>
-<html class="light" lang="en"><head>
-<meta charset="utf-8"/>
-<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-<title>Interview Invitation - Accellor</title>
-<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
-<script id="tailwind-config">
-        tailwind.config = {{
-            darkMode: "class",
-            theme: {{
-                extend: {{
-                    colors: {{
-                        "primary": "#14b8a6",
-                        "background-light": "#f6f8f8",
-                        "background-dark": "#101f22",
-                    }},
-                    fontFamily: {{
-                        "display": ["Manrope", "sans-serif"]
-                    }},
-                }},
-            }},
-        }}
-    </script>
-<style>
-        body {{
-            font-family: 'Manrope', sans-serif;
-        }}
-        .material-symbols-outlined {{
-            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
-        }}
-    </style>
-</head>
-<body class="bg-background-light min-h-screen font-display">
-<!-- Top Navigation Bar -->
-<header class="flex items-center justify-between border-b border-solid border-[#e7f1f3] bg-white px-6 md:px-20 py-4">
-<div class="flex items-center gap-4 text-[#0d191b]">
-<h2 class="text-xl font-bold leading-tight">Accellor</h2>
-</div>
-</header>
-<main class="max-w-[960px] mx-auto px-4 py-10 flex flex-col gap-8">
-<!-- Header Image / Hero Area -->
-<div class="w-full bg-center bg-no-repeat bg-cover flex flex-col justify-end overflow-hidden rounded-xl min-h-[240px] relative shadow-lg" style='background: linear-gradient(135deg, #14b8a6 0%, #0d9488 100%);'>
-<div class="p-8">
-<span class="inline-block px-3 py-1 bg-white text-[#0d9488] text-xs font-bold uppercase tracking-wider rounded-full mb-2">Invitation Confirmed</span>
-</div>
-</div>
-<!-- Page Heading -->
-<div class="flex flex-col gap-3">
-<h1 class="text-[#0d191b] text-4xl font-black leading-tight tracking-[-0.033em]">
-You've been invited to take an interview
-            </h1>
-<p class="text-[#4c8e9a] text-lg font-medium">{seniority_level} Position at Accellor</p>
-</div>
-<!-- Interview Format Breakdown -->
-<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-<div class="flex flex-1 gap-4 rounded-xl border border-[#cfe4e7] bg-white p-5 flex-col shadow-sm">
-<span class="material-symbols-outlined text-primary text-3xl">mic</span>
-<div class="flex flex-col gap-1">
-<h2 class="text-[#0d191b] text-base font-bold leading-tight">Type</h2>
-<p class="text-[#4c8e9a] text-sm font-normal leading-normal">Voice Interview</p>
-</div>
-</div>
-<div class="flex flex-1 gap-4 rounded-xl border border-[#cfe4e7] bg-white p-5 flex-col shadow-sm">
-<span class="material-symbols-outlined text-primary text-3xl">leaderboard</span>
-<div class="flex flex-col gap-1">
-<h2 class="text-[#0d191b] text-base font-bold leading-tight">Level</h2>
-<p class="text-[#4c8e9a] text-sm font-normal leading-normal">{seniority_level} Role</p>
-</div>
-</div>
-<div class="flex flex-1 gap-4 rounded-xl border border-[#cfe4e7] bg-white p-5 flex-col shadow-sm">
-<span class="material-symbols-outlined text-primary text-3xl">schedule</span>
-<div class="flex flex-col gap-1">
-<h2 class="text-[#0d191b] text-base font-bold leading-tight">Duration</h2>
-<p class="text-[#4c8e9a] text-sm font-normal leading-normal">~20 minutes</p>
-</div>
-</div>
-</div>
-<!-- Job Description -->
-{f'<div class="bg-white rounded-xl border border-[#cfe4e7] p-6 md:p-8 flex flex-col gap-4"><h2 class="text-[#0d191b] text-2xl font-bold">Position Details</h2><p class="text-[#4c8e9a] whitespace-pre-wrap">{job_description}</p></div>' if job_description else ''}
-<!-- Preparation Section -->
-<div class="bg-white rounded-xl border border-[#cfe4e7] p-6 md:p-8 flex flex-col gap-6">
-<div>
-<h2 class="text-[#0d191b] text-2xl font-bold leading-tight">Before you start</h2>
-<p class="text-gray-500 mt-1">Please ensure your environment is set up for the best experience.</p>
-</div>
-<div class="space-y-4">
-<div class="flex items-start gap-4">
-<div class="flex-shrink-0 size-6 flex items-center justify-center rounded-full bg-primary/10 text-primary mt-1">
-<span class="material-symbols-outlined text-lg">check_circle</span>
-</div>
-<div>
-<p class="text-[#0d191b] font-semibold">Microphone Access</p>
-<p class="text-gray-500 text-sm leading-relaxed">Ensure your browser has permission to access your microphone.</p>
-</div>
-</div>
-<div class="flex items-start gap-4">
-<div class="flex-shrink-0 size-6 flex items-center justify-center rounded-full bg-primary/10 text-primary mt-1">
-<span class="material-symbols-outlined text-lg">check_circle</span>
-</div>
-<div>
-<p class="text-[#0d191b] font-semibold">Quiet Environment</p>
-<p class="text-gray-500 text-sm leading-relaxed">Find a space with minimal background noise to ensure your voice is captured clearly.</p>
-</div>
-</div>
-<div class="flex items-start gap-4">
-<div class="flex-shrink-0 size-6 flex items-center justify-center rounded-full bg-primary/10 text-primary mt-1">
-<span class="material-symbols-outlined text-lg">check_circle</span>
-</div>
-<div>
-<p class="text-[#0d191b] font-semibold">Stable Internet</p>
-<p class="text-gray-500 text-sm leading-relaxed">A consistent connection is required to process your responses in real-time.</p>
-</div>
-</div>
-</div>
-<div class="bg-[#f0fdff] rounded-lg p-4 border-l-4 border-primary">
-<div class="flex gap-3">
-<span class="material-symbols-outlined text-primary">record_voice_over</span>
-<p class="text-[#0d191b] text-sm italic">
-                        "This is a voice-first experience. You will be asked questions by our AI agent and you must answer by speaking aloud."
-                    </p>
-</div>
-</div>
-</div>
-<!-- CTA Section -->
-<div class="flex flex-col items-center gap-4 py-6">
-<a href="{invite_link}" style="display: inline-block; width: 100%; max-width: 320px; padding: 16px 40px; background-color: #14b8a6; color: #0d191b; text-align: center; font-size: 18px; font-weight: 900; border-radius: 12px; text-decoration: none; box-shadow: 0 10px 25px rgba(20, 184, 166, 0.3); transition: all 0.3s ease;">
-Get Started
-            </a>
-<p class="text-gray-400 text-xs">By clicking "Get Started", you agree to our Terms of Service and Privacy Policy.</p>
-</div>
-</main>
-<!-- Footer -->
-<footer class="max-w-[960px] mx-auto px-4 pb-12 pt-6 border-t border-gray-100 flex justify-between items-center text-sm text-gray-400">
-<p>© 2024 Accellor. All rights reserved.</p>
-</footer>
-</body></html>
-"""
-            
-            email_payload = {
-                "from": {
-                    "email": "noreply@test-zkq340eorn0gd796.mlsender.net",
-                    "name": "Accellor"
-                },
-                "to": [
-                    {
-                        "email": candidate_email,
-                        "name": candidate_name
-                    }
-                ],
-                "subject": f"You're invited for a {seniority_level} interview at Accellor",
-                "html": email_html
-            }
-            
-            headers = {
-                "Authorization": f"Bearer {MAILERSEND_API_KEY}",
-                "Content-Type": "application/json"
-            }
-            
-            response = requests.post(
-                "https://api.mailersend.com/v1/email",
-                json=email_payload,
-                headers=headers
-            )
-            
-            logger.info(f"MailerSend response status: {response.status_code}")
-            if response.status_code not in [200, 202]:
-                logger.error(f"MailerSend error: {response.text}")
-                raise Exception(f"Failed to send email: {response.text}")
-            
-            logger.info(f"✅ Invite email sent successfully to {candidate_email}")
-        else:
-            logger.warning(f"MailerSend API key not configured. Invite link: {invite_link}")
+        # Log the invite link (no email service)
+        logger.info(f"📧 INVITE LINK FOR {candidate_name} ({candidate_email}): {invite_link}")
+        logger.info(f"📧 Role: {seniority_level} | Position: {role}")
         
         return {
             "success": True,
-            "message": f"Invitation sent to {candidate_email}",
+            "message": f"Invitation created for {candidate_email}. Check backend logs for link.",
             "invite_code": invite_code,
             "invite_link": invite_link
         }
     except Exception as e:
-        logger.error(f"Error sending invite: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to send invite: {str(e)}")
+        logger.error(f"Error creating invite: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create invite: {str(e)}")
+
+
 
 
 @app.post("/admin/validate-invite")
@@ -1282,12 +1115,17 @@ def validate_invite(req: dict):
         if invite.get("status") == "expired":
             raise HTTPException(status_code=400, detail="This invite has expired")
         
+        # Check if access is enabled
+        if not invite.get("access_enabled", True):
+            raise HTTPException(status_code=403, detail="This invite link is no longer active. Please contact your admin.")
+        
         return {
             "success": True,
             "invite": {
                 "candidate_name": invite.get("candidate_name"),
                 "candidate_email": invite.get("candidate_email"),
                 "seniority_level": invite.get("seniority_level"),
+                "role": invite.get("role"),
                 "job_description": invite.get("job_description"),
                 "invite_code": invite_code
             }
@@ -1297,6 +1135,110 @@ def validate_invite(req: dict):
     except Exception as e:
         logger.error(f"Error validating invite: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to validate invite: {str(e)}")
+
+
+@app.post("/admin/register-invited-user")
+def register_invited_user(req: dict):
+    """Register an invited user in Auth0 and update Cosmos DB"""
+    invite_code = req.get("invite_code")
+    password = req.get("password")
+    
+    if not invite_code or not password:
+        raise HTTPException(status_code=400, detail="invite_code and password are required")
+    
+    try:
+        from backend.core.cosmos import client
+        from azure.cosmos.partition_key import PartitionKey
+        
+        # Get database
+        db = client.get_database_client("interviewer")
+        
+        # Get invites container
+        try:
+            invites_container = db.get_container_client("invites")
+        except Exception:
+            invites_container = db.create_container(
+                id="invites",
+                partition_key=PartitionKey(path="/invite_code")
+            )
+        
+        # Get users container
+        try:
+            users_container = db.get_container_client("users")
+        except Exception:
+            users_container = db.create_container(
+                id="users",
+                partition_key=PartitionKey(path="/user_id")
+            )
+        
+        # Find the invite
+        query = "SELECT * FROM invites WHERE invites.invite_code = @code"
+        items = list(invites_container.query_items(
+            query=query,
+            parameters=[{"name": "@code", "value": invite_code}],
+            max_item_count=1
+        ))
+        
+        if not items:
+            raise HTTPException(status_code=404, detail="Invite not found")
+        
+        invite = items[0]
+        
+        # Check if access is still enabled
+        if not invite.get("access_enabled", True):
+            raise HTTPException(status_code=403, detail="This invite is no longer active")
+        
+        # Create user in Auth0
+        auth0 = Auth0Manager()
+        try:
+            auth0_user = auth0.create_user(
+                email=invite.get("candidate_email"),
+                password=password,
+                user_metadata={
+                    "job_title": invite.get("role"),
+                    "level": invite.get("seniority_level"),
+                    "invite_code": invite_code,
+                    "registered_at": datetime.utcnow().isoformat()
+                }
+            )
+            auth0_user_id = auth0_user.get("user_id")
+        except Exception as e:
+            # If Auth0 M2M is not configured, continue with registration using invite code
+            logger.warning(f"Auth0 user creation failed, using invite-based registration: {e}")
+            auth0_user_id = None
+        
+        # Update user record in Cosmos DB with Auth0 user_id
+        user_id = invite.get("user_id")
+        if user_id:
+            user_query = "SELECT * FROM users WHERE users.user_id = @id"
+            user_items = list(users_container.query_items(
+                query=user_query,
+                parameters=[{"name": "@id", "value": user_id}],
+                max_item_count=1,
+                enable_cross_partition_query=True
+            ))
+            
+            if user_items:
+                user = user_items[0]
+                if auth0_user_id:
+                    user["auth0_user_id"] = auth0_user_id
+                user["auth0_email"] = invite.get("candidate_email")
+                user["registered_at"] = datetime.utcnow().isoformat()
+                users_container.replace_item(item=user["id"], body=user)
+        
+        logger.info(f"✅ Registered invited user: {user_id} (Auth0 ID: {auth0_user_id or 'N/A'})")
+        
+        return {
+            "success": True,
+            "message": "User registered successfully",
+            "user_id": user_id,
+            "auth0_user_id": auth0_user_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error registering invited user: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to register user: {str(e)}")
 
 
 @app.get("/admin/get-invites")
@@ -1447,7 +1389,7 @@ def toggle_access(invite_code: str, req: dict):
         
         invite = items[0]
         invite["access_enabled"] = access_enabled
-        invites_container.replace_item(item=invite["id"], body=invite, partition_key=invite.get("invite_code"))
+        invites_container.replace_item(item=invite["id"], body=invite)
         
         # Also update user record if exists
         user_id = invite.get("user_id")
@@ -1464,7 +1406,7 @@ def toggle_access(invite_code: str, req: dict):
                 if user_items:
                     user = user_items[0]
                     user["access_enabled"] = access_enabled
-                    users_container.replace_item(item=user["id"], body=user, partition_key=user.get("user_id"))
+                    users_container.replace_item(item=user["id"], body=user)
             except Exception as e:
                 logger.warning(f"Could not update user access status: {e}")
         
@@ -1612,6 +1554,187 @@ async def get_questions_stats():
     except Exception as e:
         logger.error(f"Error fetching question stats: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch stats: {str(e)}")
+
+
+@app.get("/admin/analytics")
+async def get_admin_analytics():
+    """
+    Get overall platform analytics: total sessions, today's sessions, average scores.
+    """
+    try:
+        from backend.core.cosmos import sessions_container
+        from datetime import datetime, timedelta
+        
+        # Get all sessions
+        query = "SELECT c.overall_score, c.completed_at FROM sessions c"
+        all_sessions = list(sessions_container.query_items(
+            query=query,
+            enable_cross_partition_query=True
+        ))
+        
+        total_sessions = len(all_sessions)
+        
+        # Calculate today's sessions (completed today)
+        now = datetime.utcnow()
+        today_start = datetime(now.year, now.month, now.day, 0, 0, 0)
+        
+        today_sessions = 0
+        completed_scores = []
+        
+        for session in all_sessions:
+            completed_at = session.get('completed_at')
+            if completed_at:
+                # Parse the timestamp if it's a string
+                if isinstance(completed_at, str):
+                    try:
+                        completed_date = datetime.fromisoformat(completed_at.replace('Z', '+00:00'))
+                    except:
+                        completed_date = None
+                else:
+                    completed_date = completed_at
+                
+                if completed_date and completed_date >= today_start:
+                    today_sessions += 1
+            
+            # Collect scores for average
+            score = session.get('overall_score')
+            if score is not None:
+                completed_scores.append(score)
+        
+        # Calculate average score
+        average_score = sum(completed_scores) / len(completed_scores) if completed_scores else 0
+        
+        return {
+            "success": True,
+            "total_sessions": total_sessions,
+            "today_sessions": today_sessions,
+            "average_score": average_score,
+            "active_sessions": 0  # Would need WebSocket for real-time
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching admin analytics: {e}")
+        # Return default values on error instead of raising
+        return {
+            "success": True,
+            "total_sessions": 0,
+            "today_sessions": 0,
+            "average_score": 0,
+            "active_sessions": 0
+        }
+
+
+@app.get("/admin/recent-activity")
+async def get_recent_activity(limit: int = 10):
+    """
+    Get recent platform activity: new users, completed interviews, etc.
+    """
+    try:
+        from backend.core.cosmos import users_container, sessions_container
+        from datetime import datetime, timedelta
+        
+        activities = []
+        now = datetime.utcnow()
+        
+        # Get recently created users (last 24 hours)
+        try:
+            user_query = "SELECT c.user_name, c.user_email, c.created_at FROM users c ORDER BY c.created_at DESC"
+            recent_users = list(users_container.query_items(
+                query=user_query,
+                enable_cross_partition_query=True,
+                max_item_count=50
+            ))
+            
+            for user in recent_users[:5]:  # Top 5 recent users
+                created_at = user.get('created_at')
+                if created_at:
+                    if isinstance(created_at, str):
+                        try:
+                            created_date = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                        except:
+                            created_date = None
+                    else:
+                        created_date = created_at
+                    
+                    if created_date and (now - created_date).days <= 7:  # Within last 7 days
+                        time_diff = now - created_date
+                        if time_diff.days == 0:
+                            if time_diff.seconds < 3600:
+                                time_ago = f"{time_diff.seconds // 60} minutes ago"
+                            else:
+                                time_ago = f"{time_diff.seconds // 3600} hours ago"
+                        else:
+                            time_ago = f"{time_diff.days} days ago"
+                        
+                        activities.append({
+                            "type": "user_registered",
+                            "icon": "person_add",
+                            "title": f"New user registered",
+                            "description": user.get('user_name') or user.get('user_email', 'Unknown'),
+                            "time_ago": time_ago,
+                            "timestamp": created_at
+                        })
+        except Exception as e:
+            logger.warning(f"Error fetching recent users: {e}")
+        
+        # Get recently completed interviews (last 24 hours)
+        try:
+            session_query = "SELECT c.user_name, c.overall_score, c.completed_at FROM sessions c WHERE c.completed_at != null ORDER BY c.completed_at DESC"
+            recent_sessions = list(sessions_container.query_items(
+                query=session_query,
+                enable_cross_partition_query=True,
+                max_item_count=50
+            ))
+            
+            for session in recent_sessions[:5]:  # Top 5 recent sessions
+                completed_at = session.get('completed_at')
+                if completed_at:
+                    if isinstance(completed_at, str):
+                        try:
+                            completed_date = datetime.fromisoformat(completed_at.replace('Z', '+00:00'))
+                        except:
+                            completed_date = None
+                    else:
+                        completed_date = completed_at
+                    
+                    if completed_date and (now - completed_date).days <= 7:
+                        time_diff = now - completed_date
+                        if time_diff.days == 0:
+                            if time_diff.seconds < 3600:
+                                time_ago = f"{time_diff.seconds // 60} minutes ago"
+                            else:
+                                time_ago = f"{time_diff.seconds // 3600} hours ago"
+                        else:
+                            time_ago = f"{time_diff.days} days ago"
+                        
+                        score = session.get('overall_score', 0)
+                        activities.append({
+                            "type": "interview_completed",
+                            "icon": "check_circle",
+                            "title": "Interview completed",
+                            "description": f"{session.get('user_name', 'User')} - Score: {score:.1f}/10",
+                            "time_ago": time_ago,
+                            "timestamp": completed_at
+                        })
+        except Exception as e:
+            logger.warning(f"Error fetching recent sessions: {e}")
+        
+        # Sort by timestamp (most recent first) and limit
+        activities.sort(key=lambda x: x['timestamp'], reverse=True)
+        activities = activities[:limit]
+        
+        return {
+            "success": True,
+            "activities": activities
+        }
+        
+    except Exception as e:
+        logger.error(f"Error fetching recent activity: {e}")
+        return {
+            "success": True,
+            "activities": []
+        }
+
 
 
 @app.get("/admin/user-question-history/{user_id}")

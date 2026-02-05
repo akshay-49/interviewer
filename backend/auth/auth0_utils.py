@@ -1,9 +1,9 @@
-"""Auth0 token validation and utilities"""
+"""Auth0 and Entra ID token validation and utilities"""
 import os
 import json
 import base64
 from typing import Optional
-from fastapi import HTTPException, status, Depends
+from fastapi import HTTPException, status, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
 import requests
@@ -17,10 +17,16 @@ AUTH0_AUDIENCE = os.getenv("AUTH0_AUDIENCE")
 AUTH0_ALGORITHMS = ["RS256"]
 JWT_SECRET = os.getenv("JWT_SECRET_KEY")
 
+# Entra ID (Azure AD) configuration
+AZURE_TENANT_ID = os.getenv("VITE_AZURE_AUTHORITY", "").split("/")[-1] or "f8300747-02c3-470c-a3d6-5a3355e3d77d"
+AZURE_CLIENT_ID = os.getenv("VITE_AZURE_CLIENT_ID")
+AZURE_ALGORITHMS = ["RS256"]
+
 security = HTTPBearer()
 
 # Cache for Auth0 public keys
 _jwks_cache = None
+_azure_jwks_cache = None
 
 def get_auth0_public_key():
     """Fetch Auth0 public keys for JWT validation"""
@@ -39,6 +45,24 @@ def get_auth0_public_key():
             )
     
     return _jwks_cache
+
+def get_azure_public_key():
+    """Fetch Azure AD public keys for JWT validation"""
+    global _azure_jwks_cache
+    
+    if _azure_jwks_cache is None:
+        jwks_url = f"https://login.microsoftonline.com/{AZURE_TENANT_ID}/discovery/v2.0/keys"
+        try:
+            response = requests.get(jwks_url, timeout=10)
+            response.raise_for_status()
+            _azure_jwks_cache = response.json()
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Unable to fetch Azure AD public keys: {str(e)}"
+            )
+    
+    return _azure_jwks_cache
 
 def decode_token_payload(token: str) -> dict:
     """Manually decode JWT token without verification - extract claims only"""
@@ -82,20 +106,24 @@ def verify_auth0_token(token: str) -> dict:
     Raises:
         HTTPException: If token is invalid or expired
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     try:
-        print(f"Verifying token, length: {len(token)}, type: {type(token)}")
-        print(f"Token first 100 chars: {token[:100]}")
-        print(f"Token last 50 chars: {token[-50:]}")
+        logger.debug(f"Verifying token, length: {len(token)}, type: {type(token)}")
         
         # Decode payload without verification
         unverified = decode_token_payload(token)
-        print(f"Token claims: {unverified}")
+        logger.debug(f"Token claims decoded: sub={unverified.get('sub')}")
         
         # Verify the issuer is Auth0
         issuer = unverified.get("iss")
         expected_issuer = f"https://{AUTH0_DOMAIN}/"
         
+        logger.debug(f"Issuer check: got={issuer}, expected={expected_issuer}")
+        
         if issuer != expected_issuer:
+            logger.error(f"Invalid issuer: {issuer}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=f"Invalid issuer: {issuer}"
@@ -105,17 +133,20 @@ def verify_auth0_token(token: str) -> dict:
         import time
         now = time.time()
         exp = unverified.get("exp")
+        logger.debug(f"Expiration check: exp={exp}, now={now}, expired={exp and exp < now}")
+        
         if exp and exp < now:
+            logger.error(f"Token has expired: exp={exp}, now={now}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token has expired"
             )
         
-        print(f"Token accepted for user: {unverified.get('sub')}")
+        logger.info(f"Token accepted for user: {unverified.get('sub')}")
         return unverified
         
     except JWTError as e:
-        print(f"JWT Error: {e}")
+        logger.error(f"JWT Error: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Invalid token: {str(e)}"
@@ -123,10 +154,89 @@ def verify_auth0_token(token: str) -> dict:
     except HTTPException:
         raise
     except Exception as e:
-        print(f"Token validation exception: {type(e).__name__}: {e}")
+        logger.error(f"Token validation exception: {type(e).__name__}: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Token validation failed: {str(e)}"
+        )
+
+def verify_entra_id_token(token: str) -> dict:
+    """
+    Verify Entra ID (Azure AD) JWT token and return decoded payload
+    
+    Args:
+        token: JWT token from Entra ID
+        
+    Returns:
+        Decoded token payload with user information
+        
+    Raises:
+        HTTPException: If token is invalid or expired
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        logger.debug(f"Verifying Entra ID token, length: {len(token)}")
+        
+        # Decode payload without verification
+        unverified = decode_token_payload(token)
+        logger.debug(f"Token claims decoded: sub={unverified.get('sub')}, appid={unverified.get('appid')}")
+        
+        # Verify the issuer is Entra ID
+        issuer = unverified.get("iss")
+        allowed_issuers = {
+            f"https://login.microsoftonline.com/{AZURE_TENANT_ID}/v2.0",
+            f"https://login.microsoftonline.com/{AZURE_TENANT_ID}/",
+            f"https://sts.windows.net/{AZURE_TENANT_ID}/",
+        }
+
+        logger.debug(f"Issuer check: got={issuer}, allowed={allowed_issuers}")
+
+        if not issuer or issuer not in allowed_issuers:
+            logger.error(f"Invalid Entra ID issuer: {issuer}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Invalid Entra ID issuer: {issuer}"
+            )
+        
+        # Verify the audience (should be our client ID)
+        aud = unverified.get("aud")
+        logger.debug(f"Audience check: got={aud}, expected={AZURE_CLIENT_ID}")
+        if isinstance(aud, list):
+            audience_valid = AZURE_CLIENT_ID in aud
+        else:
+            audience_valid = aud == AZURE_CLIENT_ID
+        if not audience_valid:
+            logger.error(f"Invalid audience: {aud}, expected {AZURE_CLIENT_ID}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Invalid audience"
+            )
+        
+        # Check token expiration
+        import time
+        now = time.time()
+        exp = unverified.get("exp")
+        logger.debug(f"Expiration check: exp={exp}, now={now}")
+        
+        if exp and exp < now:
+            logger.error(f"Token has expired: exp={exp}, now={now}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has expired"
+            )
+        
+        logger.info(f"Entra ID token accepted for user: {unverified.get('preferred_username')} (appid={unverified.get('appid')})")
+        return unverified
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Entra ID token validation exception: {type(e).__name__}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Entra ID token validation failed: {str(e)}"
         )
 
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
@@ -141,6 +251,56 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
     """
     token = credentials.credentials
     return verify_auth0_token(token)
+
+def get_current_user_from_cookie(request: Request) -> dict:
+    """
+    Dependency to get current user from httpOnly cookie or Authorization header
+    Supports both Auth0 and Entra ID tokens
+    
+    Args:
+        request: FastAPI Request object
+        
+    Returns:
+        Decoded token payload
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Try to get token from httpOnly cookie first
+    token = request.cookies.get("access_token")
+    logger.debug(f"Token from cookie: {'Found' if token else 'Not found'}")
+    logger.debug(f"All cookies: {list(request.cookies.keys())}")
+    
+    # If not in cookie, try Authorization header
+    if not token:
+        auth_header = request.headers.get("Authorization", "")
+        logger.debug(f"Auth header: {auth_header[:20] if auth_header else 'None'}")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+            logger.debug("Token from Authorization header")
+    
+    if not token:
+        logger.warning("No authentication token found in cookie or header")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing authentication token"
+        )
+    
+    # Try to determine token type by examining the issuer claim
+    try:
+        unverified = decode_token_payload(token)
+        issuer = unverified.get("iss", "")
+        
+        # Check if it's an Entra ID token
+        if "login.microsoftonline.com" in issuer:
+            logger.debug("Detected Entra ID token, verifying with Entra ID rules")
+            return verify_entra_id_token(token)
+        else:
+            logger.debug("Detected Auth0 token, verifying with Auth0 rules")
+            return verify_auth0_token(token)
+    except Exception as e:
+        logger.error(f"Token type detection failed: {e}, trying Auth0 validation")
+        return verify_auth0_token(token)
 
 def extract_user_info(auth0_payload: dict) -> dict:
     """

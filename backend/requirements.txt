@@ -11,7 +11,5 @@ pydantic
 pymongo
 azure-cosmos
 python-jose[cryptography]
-auth0-python
-python-dotenv
-requests
-azure-storage-blob
+PyJWT
+bcrypt

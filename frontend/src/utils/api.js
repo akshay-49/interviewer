@@ -215,8 +215,8 @@ export const historyApi = {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
                 },
+                credentials: 'include',  // Send httpOnly cookie
                 body: JSON.stringify(sessionData)
             });
             
@@ -238,8 +238,8 @@ export const historyApi = {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
                 },
+                credentials: 'include',  // Send httpOnly cookie
                 body: JSON.stringify({ user_id: userId })
             });
             
@@ -262,8 +262,8 @@ export const historyApi = {
                 method: 'GET',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
-                }
+                },
+                credentials: 'include'  // Send httpOnly cookie
             });
             
             if (!response.ok) {
@@ -332,8 +332,8 @@ export const historyApi = {
                 method: 'GET',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
-                }
+                },
+                credentials: 'include'  // Send httpOnly cookie
             });
             
             if (!response.ok) {
@@ -360,8 +360,8 @@ export const historyApi = {
                 method: 'DELETE',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('auth_token') || ''}`
-                }
+                },
+                credentials: 'include'  // Send httpOnly cookie
             });
             
             if (!response.ok) {

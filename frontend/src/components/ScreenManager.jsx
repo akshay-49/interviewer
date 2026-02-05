@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useInterview } from '../context/InterviewContext';
 import ProfileMenu from './ProfileMenu';
 import LoginScreen from './screens/LoginScreen';
@@ -14,14 +14,51 @@ import ReportScreen from './screens/ReportScreen';
 import AdminDashboardScreen from './screens/AdminDashboardScreen';
 import InviteCandidateScreen from './screens/InviteCandidateScreen';
 import UserSessionsScreen from './screens/UserSessionsScreen';
+import InviteAcceptanceScreen from './screens/InviteAcceptanceScreen';
+import CustomLoginScreen from './screens/CustomLoginScreen';
+import CallbackPage from './screens/CallbackPage';
+import AdminLoginScreen from './screens/AdminLoginScreen';
 
 const ScreenManager = () => {
-    const { currentScreen, theme, toggleTheme, navigateTo, interview, resetInterview } = useInterview();
+    const { currentScreen, currentParams, theme, toggleTheme, navigateTo, interview, resetInterview } = useInterview();
+
+    // Check for special routes in URL on mount
+    useEffect(() => {
+        const path = window.location.pathname;
+        
+        // Check for admin login in progress (from Microsoft redirect) - check only once
+        const adminLoginInProgress = sessionStorage.getItem('adminLoginInProgress');
+        if (adminLoginInProgress && currentScreen !== 'admin-login' && currentScreen !== 'admin-dashboard') {
+            console.log('Admin login in progress detected, routing to admin-login');
+            navigateTo('admin-login');
+            return;
+        }
+        
+        // Check for admin route
+        if ((path === '/admin' || path === '/admin/') && currentScreen !== 'admin-login' && currentScreen !== 'admin-dashboard') {
+            console.log('Admin path detected, routing to admin-login');
+            navigateTo('admin-login');
+            return;
+        }
+        
+        // Check for invite code
+        const inviteMatch = path.match(/\/invite\/([^/]+)/);
+        if (inviteMatch) {
+            const inviteCode = inviteMatch[1];
+            navigateTo('invite-acceptance', { invite_code: inviteCode });
+        }
+    }, []);
 
     const renderScreen = () => {
         switch (currentScreen) {
             case 'login':
                 return <LoginScreen />;
+            case 'admin-login':
+                return <AdminLoginScreen />;
+            case 'callback':
+                return <CallbackPage />;
+            case 'custom-login':
+                return <CustomLoginScreen />;
             case 'signup':
                 return <SignupScreen />;
             case 'forgot-password':
@@ -46,6 +83,8 @@ const ScreenManager = () => {
                 return <InviteCandidateScreen />;
             case 'user-sessions':
                 return <UserSessionsScreen />;
+            case 'invite-acceptance':
+                return <InviteAcceptanceScreen inviteCode={currentParams?.invite_code} />;
             default:
                 return <LoginScreen />;
         }
@@ -70,13 +109,15 @@ const ScreenManager = () => {
     };
 
     // Check if we're on an auth screen
-    const isAuthScreen = ['login', 'signup', 'forgot-password'].includes(currentScreen);
+    const isAuthScreen = ['login', 'signup', 'forgot-password', 'custom-login'].includes(currentScreen);
     const isAdminScreen = ['admin-dashboard', 'invite-candidate'].includes(currentScreen);
+    const isInviteScreen = currentScreen === 'invite-acceptance';
+    const showProfileMenu = !['admin-login', 'admin-dashboard', 'invite-candidate'].includes(currentScreen);
 
     return (
         <div className="w-screen h-screen flex flex-col">
             {/* Header */}
-            {isAdminScreen ? null : isAuthScreen ? (
+            {isAdminScreen || isInviteScreen ? null : isAuthScreen ? (
                 // Minimal header for auth screens - just logo
                 <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-6 py-2 flex justify-start items-center flex-shrink-0">
                     <img src="/accellor-logo.svg" alt="Accellor" className="h-8" />
@@ -115,8 +156,8 @@ const ScreenManager = () => {
                         <div className="w-2 h-2 rounded-full bg-green-500"></div>
                     </div>
 
-                    {/* Profile Menu */}
-                    <ProfileMenu />
+                    {/* Profile Menu - hidden on admin screens */}
+                    {showProfileMenu && <ProfileMenu />}
                 </div>
             </header>
             )}

@@ -18,7 +18,7 @@ const msalConfig = {
         redirectUri: AZURE_REDIRECT_URI,
     },
     cache: {
-        cacheLocation: "localStorage",
+        cacheLocation: "sessionStorage",
         storeAuthStateInCookie: false,
     },
     system: {
@@ -44,8 +44,19 @@ msalInstance.initialize().catch(err => {
 
 export const getMsalInstance = () => msalInstance;
 
+const clientId = import.meta.env.VITE_AZURE_CLIENT_ID;
+console.log('VITE_AZURE_CLIENT_ID:', clientId);
+
+// Use client ID as the scopes to get token with correct audience
 export const loginRequest = {
-    scopes: ["User.Read"],
+    scopes: [`${clientId}/.default`, "openid", "profile", "email"],
 };
+
+export const tokenRequest = {
+    scopes: [`${clientId}/.default`],
+};
+
+console.log('Login request scopes:', loginRequest.scopes);
+console.log('Token request scopes:', tokenRequest.scopes);
 
 export { msalInstance };

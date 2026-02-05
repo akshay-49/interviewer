@@ -1,34 +1,12 @@
 import React from 'react';
-import { useAuth0 } from '@auth0/auth0-react';
 import { useInterview } from '../../context/InterviewContext';
 
 const SignupScreen = () => {
-    const { loginWithRedirect, isLoading } = useAuth0();
     const { navigateTo } = useInterview();
-
-    const handleSignup = () => {
-        loginWithRedirect({
-            authorizationParams: {
-                screen_hint: 'signup'
-            }
-        });
-    };
 
     const handleLogin = () => {
         navigateTo('login');
     };
-
-
-    if (isLoading) {
-        return (
-            <div className="bg-background-light dark:bg-background-dark font-display h-full flex items-center justify-center">
-                <div className="text-center">
-                    <div className="inline-block w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4"></div>
-                    <p className="text-gray-600 dark:text-gray-300">Loading...</p>
-                </div>
-            </div>
-        );
-    }
 
     return (
         <div className="bg-background-light dark:bg-background-dark font-display h-full flex flex-col overflow-x-hidden transition-colors duration-300">
@@ -41,24 +19,26 @@ const SignupScreen = () => {
                     {/* Header */}
                     <div className="mb-8">
                         <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary/10 dark:bg-primary/20 mb-4">
-                            <span className="text-3xl">🚀</span>
+                            <span className="text-3xl">📧</span>
                         </div>
                         <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
-                            Create Account
+                            Join Accellor
                         </h1>
                         <p className="text-gray-600 dark:text-gray-300">
-                            Join AI Interview Coach with Auth0
+                            Invite-only access
                         </p>
                     </div>
 
-                    {/* Signup Button */}
+                    {/* Message */}
                     <div className="space-y-4">
-                        <button
-                            onClick={handleSignup}
-                            className="w-full px-6 py-3 bg-primary text-white font-semibold rounded-lg hover:bg-primary/90 active:scale-[0.98] transition-all shadow-md shadow-primary/30"
-                        >
-                            Sign Up with Auth0
-                        </button>
+                        <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg p-4">
+                            <p className="text-blue-800 dark:text-blue-200 text-sm">
+                                ✨ Accellor is by invitation only. 
+                            </p>
+                            <p className="text-blue-700 dark:text-blue-300 text-sm mt-2">
+                                If you've received an invite link, click the link in your email to get started.
+                            </p>
+                        </div>
 
                         {/* Login Link */}
                         <div className="text-center text-sm text-gray-600 dark:text-gray-400">
@@ -72,34 +52,14 @@ const SignupScreen = () => {
                         </div>
                     </div>
 
-                    {/* Features */}
+                    {/* Information */}
                     <div className="mt-8 pt-8 border-t border-gray-200 dark:border-gray-700">
                         <p className="text-xs text-gray-500 dark:text-gray-400 text-center mb-4">
-                            What you'll get
+                            Don't have an invite?
                         </p>
-                        <div className="space-y-3">
-                            <div className="flex items-start gap-3">
-                                <span className="text-primary text-xl flex-shrink-0">✓</span>
-                                <div className="text-sm text-gray-600 dark:text-gray-300">
-                                    <strong>AI-Powered Interviews</strong>
-                                    <p className="text-xs text-gray-500 dark:text-gray-400">Practice with realistic interview scenarios</p>
-                                </div>
-                            </div>
-                            <div className="flex items-start gap-3">
-                                <span className="text-primary text-xl flex-shrink-0">✓</span>
-                                <div className="text-sm text-gray-600 dark:text-gray-300">
-                                    <strong>Instant Feedback</strong>
-                                    <p className="text-xs text-gray-500 dark:text-gray-400">Get detailed analysis of your performance</p>
-                                </div>
-                            </div>
-                            <div className="flex items-start gap-3">
-                                <span className="text-primary text-xl flex-shrink-0">✓</span>
-                                <div className="text-sm text-gray-600 dark:text-gray-300">
-                                    <strong>Track Progress</strong>
-                                    <p className="text-xs text-gray-500 dark:text-gray-400">Monitor your improvement over time</p>
-                                </div>
-                            </div>
-                        </div>
+                        <p className="text-xs text-gray-600 dark:text-gray-300 text-center">
+                            Contact your recruitment team to request an invitation to interview with Accellor.
+                        </p>
                     </div>
                 </div>
             </main>

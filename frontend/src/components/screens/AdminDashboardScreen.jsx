@@ -1,11 +1,12 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useInterview } from '../../context/InterviewContext';
-import { useAuth0 } from '@auth0/auth0-react';
+import { useAuth } from '../../hooks/useAuth';
 import QuestionBankScreen from './QuestionBankScreen';
+import InviteCandidateScreen from './InviteCandidateScreen';
 
 const AdminDashboardScreen = () => {
     const { navigateTo, user, updateUser, resetInterview } = useInterview();
-    const { logout } = useAuth0();
+    const { logout } = useAuth();
     const [activeTab, setActiveTab] = useState('overview');
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
     const [users, setUsers] = useState([]);
@@ -13,6 +14,8 @@ const AdminDashboardScreen = () => {
     const [usersError, setUsersError] = useState('');
     const [analytics, setAnalytics] = useState(null);
     const [analyticsLoading, setAnalyticsLoading] = useState(false);
+    const [recentActivity, setRecentActivity] = useState([]);
+    const [activityLoading, setActivityLoading] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [userFilter, setUserFilter] = useState('all');
     const [selectedUser, setSelectedUser] = useState(null);
@@ -40,22 +43,33 @@ const AdminDashboardScreen = () => {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    const handleLogout = () => {
+    const handleLogout = async () => {
         setIsProfileOpen(false);
-        updateUser({
-            name: 'Guest User',
-            email: null,
-            isLoggedIn: false,
-            isAdmin: false,
-            picture: null,
-        });
-        resetInterview();
-        logout({
-            logoutParams: {
-                returnTo: window.location.origin,
-            },
-        });
+        
+        try {
+            // Clear all stored data
+            localStorage.clear();
+            sessionStorage.clear();
+            
+            // Reset app state
+            updateUser({
+                name: 'Guest User',
+                email: null,
+                isLoggedIn: false,
+                isAdmin: false,
+                picture: null,
+            });
+            resetInterview();
+            
+            // Call Auth0 logout
+            await logout();
+        } catch (error) {
+            console.error('Logout error:', error);
+            // Still navigate to login even if logout fails
+            navigateTo('login');
+        }
     };
+
 
     const loadUsers = async (signal) => {
         setUsersLoading(true);
@@ -74,13 +88,12 @@ const AdminDashboardScreen = () => {
                 return;
             }
 
-            // Fallback to auth endpoint
-            const token = localStorage.getItem('access_token');
+            // Fallback to auth endpoint (use httpOnly cookie)
             const response = await fetch('http://localhost:8000/auth/admin/users', {
                 headers: {
                     'Content-Type': 'application/json',
-                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
                 },
+                credentials: 'include',  // Send httpOnly cookie
                 signal,
             });
 
@@ -103,40 +116,64 @@ const AdminDashboardScreen = () => {
     const loadAnalytics = async () => {
         setAnalyticsLoading(true);
         try {
-            // Fetch analytics from backend - using historyApi to get all sessions
-            const allSessions = [];
-            for (const user of users) {
-                try {
-                    const response = await fetch('http://localhost:8000/session/user-history', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ user_id: user.id })
-                    });
-                    if (response.ok) {
-                        const sessions = await response.json();
-                        allSessions.push(...sessions);
-                    }
-                } catch (err) {
-                    console.error(`Failed to load sessions for user ${user.id}:`, err);
-                }
-            }
-            
-            // Calculate analytics
-            const now = new Date();
-            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-            const todaySessions = allSessions.filter(s => new Date(s.completed_at) >= today);
-            const avgScore = allSessions.length > 0 ? allSessions.reduce((sum, s) => sum + (s.overall_score || 0), 0) / allSessions.length : 0;
-            
-            setAnalytics({
-                totalSessions: allSessions.length,
-                todaySessions: todaySessions.length,
-                averageScore: avgScore.toFixed(1),
-                activeSessions: 0 // Would need WebSocket or polling for real-time data
+            // Fetch analytics from admin endpoint (which gets all sessions across all users)
+            const response = await fetch('http://localhost:8000/admin/analytics', {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' }
             });
+            
+            if (response.ok) {
+                const data = await response.json();
+                setAnalytics({
+                    totalSessions: data.total_sessions || 0,
+                    todaySessions: data.today_sessions || 0,
+                    averageScore: data.average_score?.toFixed(1) || '0',
+                    activeSessions: data.active_sessions || 0
+                });
+            } else {
+                console.error('Failed to fetch analytics:', response.status);
+                // Fallback to zero values if endpoint fails
+                setAnalytics({
+                    totalSessions: 0,
+                    todaySessions: 0,
+                    averageScore: '0',
+                    activeSessions: 0
+                });
+            }
         } catch (err) {
             console.error('Failed to load analytics:', err);
+            // Set default values on error
+            setAnalytics({
+                totalSessions: 0,
+                todaySessions: 0,
+                averageScore: '0',
+                activeSessions: 0
+            });
         } finally {
             setAnalyticsLoading(false);
+        }
+    };
+
+    const loadRecentActivity = async () => {
+        setActivityLoading(true);
+        try {
+            const response = await fetch('http://localhost:8000/admin/recent-activity?limit=10', {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                setRecentActivity(data.activities || []);
+            } else {
+                console.error('Failed to fetch recent activity:', response.status);
+                setRecentActivity([]);
+            }
+        } catch (err) {
+            console.error('Failed to load recent activity:', err);
+            setRecentActivity([]);
+        } finally {
+            setActivityLoading(false);
         }
     };
 
@@ -149,6 +186,7 @@ const AdminDashboardScreen = () => {
     useEffect(() => {
         if (users.length > 0 && !analytics) {
             loadAnalytics();
+            loadRecentActivity();
         }
     }, [users]);
 
@@ -250,6 +288,53 @@ const AdminDashboardScreen = () => {
         }
     };
 
+    const deleteUser = async (userId, userEmail) => {
+        if (!confirm(`Are you sure you want to delete user ${userEmail}? This action cannot be undone.`)) {
+            return;
+        }
+        
+        try {
+            // Get token from sessionStorage as fallback if cookie isn't working
+            const token = sessionStorage.getItem('access_token');
+            
+            console.log('Delete User Debug:', {
+                userId,
+                userEmail,
+                hasToken: !!token,
+                tokenLength: token ? token.length : 0
+            });
+            
+            if (!token) {
+                alert('No authentication token found. Please log in again.');
+                return;
+            }
+            
+            const response = await fetch(`http://localhost:8000/auth/admin/users/${userId}`, {
+                method: 'DELETE',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                credentials: 'include',
+            });
+            
+            console.log('Delete response status:', response.status);
+            
+            if (response.ok) {
+                // Reload users to get updated data
+                await loadUsers();
+                alert('User deleted successfully');
+            } else {
+                const error = await response.json();
+                console.error('Delete error:', error);
+                alert(`Failed to delete user: ${error.detail || 'Unknown error'}`);
+            }
+        } catch (err) {
+            console.error('Error deleting user:', err);
+            alert(`Failed to delete user: ${err.message}`);
+        }
+    };
+
     return (
         <div className="min-h-screen bg-[#f6f8f8]">
             {/* Top Navigation Bar */}
@@ -286,6 +371,12 @@ const AdminDashboardScreen = () => {
                                 Questions
                             </button>
                             <button 
+                                onClick={() => setActiveTab('invites')}
+                                className={`text-sm font-semibold transition-colors ${activeTab === 'invites' ? 'text-primary font-bold' : 'text-[#4c8e9a] hover:text-primary'}`}
+                            >
+                                Invites
+                            </button>
+                            <button 
                                 onClick={() => setActiveTab('analytics')}
                                 className={`text-sm font-semibold transition-colors ${activeTab === 'analytics' ? 'text-primary font-bold' : 'text-[#4c8e9a] hover:text-primary'}`}
                             >
@@ -299,41 +390,22 @@ const AdminDashboardScreen = () => {
                             </button>
                         </nav>
                     </div>
-                    <div className="flex items-center gap-6">
-                        <div ref={profileMenuRef} className="relative">
-                            <button
-                                type="button"
-                                onClick={() => setIsProfileOpen(!isProfileOpen)}
-                                className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-[#e7f1f3] transition-colors"
-                                aria-label="Profile menu"
-                            >
-                                <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-sm font-semibold">
-                                    {initials}
-                                </div>
-                                <span className="hidden md:block text-sm font-medium text-[#0d191b]">
-                                    {displayName}
-                                </span>
-                                <span className={`material-symbols-outlined text-[20px] text-[#4c8e9a] transition-transform ${isProfileOpen ? 'rotate-180' : ''}`}>
-                                    expand_more
-                                </span>
-                            </button>
-
-                            {isProfileOpen && (
-                                <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
-                                    <div className="px-4 py-2 border-b border-gray-200">
-                                        <p className="text-xs text-gray-500">Signed in as</p>
-                                        <p className="text-sm font-medium text-gray-900 truncate">{displayName}</p>
-                                    </div>
-                                    <button
-                                        onClick={handleLogout}
-                                        className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2"
-                                    >
-                                        <span className="material-symbols-outlined text-[18px]">logout</span>
-                                        Logout
-                                    </button>
-                                </div>
-                            )}
+                    <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2">
+                            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-sm font-semibold">
+                                {initials}
+                            </div>
+                            <span className="hidden md:block text-sm font-medium text-[#0d191b]">
+                                {displayName}
+                            </span>
                         </div>
+                        <button
+                            onClick={handleLogout}
+                            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 transition-colors text-sm font-semibold"
+                        >
+                            <span className="material-symbols-outlined text-[18px]">logout</span>
+                            <span className="hidden md:inline">Logout</span>
+                        </button>
                     </div>
                 </div>
             </header>
@@ -393,35 +465,40 @@ const AdminDashboardScreen = () => {
                         {/* Recent Activity */}
                         <div className="bg-white rounded-xl border border-[#e7f1f3] shadow-sm p-6">
                             <h3 className="text-lg font-bold mb-4">Recent Activity</h3>
-                            <div className="space-y-3">
-                                <div className="flex items-center gap-4 p-3 hover:bg-[#f8fbfc] rounded-lg transition-colors">
-                                    <div className="size-10 rounded-full bg-primary/10 flex items-center justify-center">
-                                        <span className="material-symbols-outlined text-primary text-[20px]">person_add</span>
-                                    </div>
-                                    <div className="flex-1">
-                                        <p className="text-sm font-semibold">New user registered</p>
-                                        <p className="text-xs text-[#4c8e9a]">2 minutes ago</p>
-                                    </div>
+                            {activityLoading ? (
+                                <div className="text-center py-8">
+                                    <p className="text-[#4c8e9a]">Loading activity...</p>
                                 </div>
-                                <div className="flex items-center gap-4 p-3 hover:bg-[#f8fbfc] rounded-lg transition-colors">
-                                    <div className="size-10 rounded-full bg-green-50 flex items-center justify-center">
-                                        <span className="material-symbols-outlined text-green-600 text-[20px]">check_circle</span>
-                                    </div>
-                                    <div className="flex-1">
-                                        <p className="text-sm font-semibold">Interview completed</p>
-                                        <p className="text-xs text-[#4c8e9a]">15 minutes ago</p>
-                                    </div>
+                            ) : recentActivity.length > 0 ? (
+                                <div className="space-y-3">
+                                    {recentActivity.map((activity, idx) => (
+                                        <div key={idx} className="flex items-center gap-4 p-3 hover:bg-[#f8fbfc] rounded-lg transition-colors">
+                                            <div className={`size-10 rounded-full flex items-center justify-center ${
+                                                activity.type === 'user_registered' ? 'bg-primary/10' :
+                                                activity.type === 'interview_completed' ? 'bg-green-50' :
+                                                'bg-amber-50'
+                                            }`}>
+                                                <span className={`material-symbols-outlined text-[20px] ${
+                                                    activity.type === 'user_registered' ? 'text-primary' :
+                                                    activity.type === 'interview_completed' ? 'text-green-600' :
+                                                    'text-amber-600'
+                                                }`}>
+                                                    {activity.icon}
+                                                </span>
+                                            </div>
+                                            <div className="flex-1">
+                                                <p className="text-sm font-semibold">{activity.title}</p>
+                                                <p className="text-xs text-[#4c8e9a]">{activity.description}</p>
+                                            </div>
+                                            <p className="text-xs text-[#4c8e9a] whitespace-nowrap">{activity.time_ago}</p>
+                                        </div>
+                                    ))}
                                 </div>
-                                <div className="flex items-center gap-4 p-3 hover:bg-[#f8fbfc] rounded-lg transition-colors">
-                                    <div className="size-10 rounded-full bg-amber-50 flex items-center justify-center">
-                                        <span className="material-symbols-outlined text-amber-600 text-[20px]">schedule</span>
-                                    </div>
-                                    <div className="flex-1">
-                                        <p className="text-sm font-semibold">System backup completed</p>
-                                        <p className="text-xs text-[#4c8e9a]">1 hour ago</p>
-                                    </div>
+                            ) : (
+                                <div className="text-center py-8">
+                                    <p className="text-[#4c8e9a]">No recent activity</p>
                                 </div>
-                            </div>
+                            )}
                         </div>
                     </>
                 )}
@@ -450,13 +527,6 @@ const AdminDashboardScreen = () => {
                                     </select>
                                     <span className="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-[18px] pointer-events-none">filter_list</span>
                                 </div>
-                                <button 
-                                    onClick={() => navigateTo('invite-candidate')}
-                                    className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary text-white text-sm font-bold hover:shadow-lg hover:shadow-primary/30 transition-all"
-                                >
-                                    <span className="material-symbols-outlined text-[18px]">person_add</span>
-                                    Invite User
-                                </button>
                             </div>
                         </div>
 
@@ -623,9 +693,42 @@ const AdminDashboardScreen = () => {
                                                             navigateTo('user-sessions', { userId: selectedUserObj.id });
                                                             setShowUserMenu(null);
                                                         }}
-                                                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-[#f8fbfc] border-t border-[#e7f1f3] last:rounded-b-lg"
+                                                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-[#f8fbfc] border-t border-[#e7f1f3]"
                                                     >
                                                         View Sessions
+                                                    </button>
+                                                    <button
+                                                        onClick={() => {
+                                                            setShowUserMenu(null);
+                                                            // Show role/level selector
+                                                            const role = prompt('Enter job role (e.g., Software Engineer, Product Manager):');
+                                                            if (role) {
+                                                                const level = prompt('Enter seniority level (e.g., Junior, Mid, Senior):');
+                                                                if (level) {
+                                                                    // Save user context and start interview
+                                                                    updateUser({
+                                                                        name: selectedUserObj.full_name,
+                                                                        email: selectedUserObj.email,
+                                                                        isLoggedIn: true,
+                                                                        isAdmin: false,
+                                                                    });
+                                                                    // Navigate directly to interview with role and level
+                                                                    navigateTo('interview', { role, level });
+                                                                }
+                                                            }
+                                                        }}
+                                                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-green-50 border-t border-[#e7f1f3] text-green-700 font-semibold"
+                                                    >
+                                                        Start Interview
+                                                    </button>
+                                                    <button
+                                                        onClick={() => {
+                                                            setShowUserMenu(null);
+                                                            deleteUser(selectedUserObj.id, selectedUserObj.email);
+                                                        }}
+                                                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-red-50 border-t border-[#e7f1f3] last:rounded-b-lg text-red-600 font-semibold"
+                                                    >
+                                                        Delete User
                                                     </button>
                                                 </>
                                             ) : null;
@@ -640,6 +743,11 @@ const AdminDashboardScreen = () => {
                 {/* Questions Tab */}
                 {activeTab === 'questions' && (
                     <QuestionBankScreen />
+                )}
+
+                {/* Invites Tab */}
+                {activeTab === 'invites' && (
+                    <InviteCandidateScreen />
                 )}
 
                 {/* Coming Soon for other tabs */}

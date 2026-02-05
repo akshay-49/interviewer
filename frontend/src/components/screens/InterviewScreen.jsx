@@ -10,7 +10,7 @@ const FOR_TEST = false;
 const STT_PROVIDER = 'webspeech'; // Options: 'azure' | 'webspeech'
 
 const InterviewScreen = () => {
-    const { interview, updateInterview, navigateTo, theme, toggleTheme, registerStopRecordingCallback } = useInterview();
+    const { interview, updateInterview, navigateTo, theme, toggleTheme, registerStopRecordingCallback, currentParams } = useInterview();
     const [panelState, setPanelState] = useState('loading'); // 'loading', 'speaking', 'listening', 'evaluating', 'skipping', 'coach-feedback'
     const [transcript, setTranscript] = useState('');
     const [endingSession, setEndingSession] = useState(false);
@@ -45,6 +45,34 @@ const InterviewScreen = () => {
     const allowRecordingRef = useRef(false);
 
     const [isSpeakingQuestion, setIsSpeakingQuestion] = useState(false);
+    // Auto-start interview if role and level are provided via params (from admin dashboard)
+    useEffect(() => {
+        if (currentParams?.role && currentParams?.level && !interview.sessionId) {
+            console.log('Auto-starting interview with role:', currentParams.role, 'level:', currentParams.level);
+            const startAutoInterview = async () => {
+                try {
+                    const result = await api.startInterview(currentParams.role, currentParams.level, '', 'strict');
+                    if (result) {
+                        console.log('Interview started:', result);
+                        updateInterview({
+                            sessionId: result.session_id,
+                            userId: result.user_id || localStorage.getItem('user_id'),
+                            userEmail: result.user_email || localStorage.getItem('user_email'),
+                            userName: result.user_name || localStorage.getItem('user_name'),
+                            role: currentParams.role,
+                            experience: currentParams.level,
+                            questionNumber: 1,
+                            totalQuestions: result.total_questions || 5
+                        });
+                    }
+                } catch (error) {
+                    console.error('Failed to auto-start interview:', error);
+                    setPanelState('error');
+                }
+            };
+            startAutoInterview();
+        }
+    }, [currentParams?.role, currentParams?.level]);
 
     // Speak question text when component mounts or when new question arrives
     useEffect(() => {

@@ -12,7 +12,18 @@ export const useInterview = () => {
 };
 
 export const InterviewProvider = ({ children }) => {
-    const [currentScreen, setCurrentScreen] = useState('login');
+    // Check if we're coming back from Microsoft redirect
+    const getInitialScreen = () => {
+        if (typeof window !== 'undefined') {
+            const adminLoginInProgress = sessionStorage.getItem('adminLoginInProgress');
+            if (adminLoginInProgress) {
+                return 'admin-login';
+            }
+        }
+        return 'login';
+    };
+    
+    const [currentScreen, setCurrentScreen] = useState(getInitialScreen);
     const [currentParams, setCurrentParams] = useState(null);
     const [backendAvailable, setBackendAvailable] = useState(false);
     const stopRecordingCallbackRef = useRef(null);

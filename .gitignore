@@ -38,6 +38,7 @@ Thumbs.db
 # Environment variables
 .env
 .env.local
+.env.production
 
 # Node/Frontend
 node_modules/

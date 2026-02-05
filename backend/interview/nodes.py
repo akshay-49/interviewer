@@ -34,6 +34,41 @@ def _get_question_hash(text: str) -> str:
     return hashlib.md5(normalized.encode()).hexdigest()
 
 
+def _calculate_text_similarity(text1: str, text2: str) -> float:
+    """Calculate similarity between two texts using Jaccard similarity on word sets."""
+    words1 = set(_normalize_question_text(text1).split())
+    words2 = set(_normalize_question_text(text2).split())
+    
+    if not words1 or not words2:
+        return 0.0
+    
+    intersection = len(words1 & words2)
+    union = len(words1 | words2)
+    return intersection / union if union > 0 else 0.0
+
+
+def _is_similar_question_exists(question_text: str, category: str, similarity_threshold: float = 0.65) -> bool:
+    """Check if a similar question already exists (not just exact duplicates)."""
+    try:
+        query = f"SELECT c.text FROM questions c WHERE c.category = @category"
+        items = list(questions_container.query_items(
+            query=query,
+            parameters=[{"name": "@category", "value": category}],
+            enable_cross_partition_query=True
+        ))
+        
+        for item in items:
+            existing_text = item.get("text", "")
+            similarity = _calculate_text_similarity(question_text, existing_text)
+            if similarity >= similarity_threshold:
+                logger.info(f"Similar question found (similarity: {similarity:.2f}): {existing_text[:60]}...")
+                return True
+        return False
+    except Exception as e:
+        logger.warning(f"Error checking for similar questions: {e}")
+        return False
+
+
 def _classify_question_category(question_text: str) -> str:
     """
     Classify the question into categories based on keywords in the question text.
@@ -84,10 +119,10 @@ def _classify_question_category(question_text: str) -> str:
 
 
 def _is_duplicate_question(question_text: str, category: str) -> bool:
-    """Check if a similar question already exists in the database."""
+    """Check if an exact or very similar question already exists in the database."""
     try:
+        # First check for exact duplicates using hash
         question_hash = _get_question_hash(question_text)
-        # Query by category and check if similar question exists
         query = f"SELECT * FROM questions c WHERE c.category = @category AND c.hash = @hash"
         items = list(questions_container.query_items(
             query=query,
@@ -97,7 +132,11 @@ def _is_duplicate_question(question_text: str, category: str) -> bool:
             ],
             enable_cross_partition_query=True
         ))
-        return len(items) > 0
+        if len(items) > 0:
+            return True
+        
+        # Then check for similar questions
+        return _is_similar_question_exists(question_text, category, similarity_threshold=0.65)
     except Exception as e:
         logger.warning(f"Error checking for duplicate question: {e}")
         return False
@@ -239,15 +278,17 @@ def ask_question_node(state: InterviewState) -> Dict:
     Save unique questions to Cosmos DB and log for user.
     
     PREVENTS RE-ASKING: Uses unasked bank questions first, then retries LLM generation.
+    PREVENTS DUPLICATES: Checks for exact and similar questions before saving.
     """
     logger.debug(f"Generating question (difficulty={state['difficulty']}, count={state['question_count']})")
     
     # Get user's previously asked question IDs to prevent re-asking
     user_id = state.get("user_id")
+    session_id = state.get("session_id")
     previously_asked_ids = set()
     if user_id:
         previously_asked_ids = _get_user_asked_questions(user_id)
-        logger.info(f"User {user_id} has been asked {len(previously_asked_ids)} questions already")
+        logger.info(f"User {user_id} has been asked {len(previously_asked_ids)} unique questions across all sessions")
 
     # 1) Prefer unasked question bank items first
     if user_id:
@@ -262,7 +303,6 @@ def ask_question_node(state: InterviewState) -> Dict:
             logger.info(f"✅ Using unasked question from bank: {question_id}")
 
             # Log that this question was asked to this user
-            session_id = state.get("session_id")
             if question_id and user_id:
                 _log_question_asked(user_id, question_id, question_text, session_id)
 
@@ -281,8 +321,8 @@ def ask_question_node(state: InterviewState) -> Dict:
             }
     
     # 2) If no unasked bank question, try LLM generation
-    # Try up to 3 times to generate a new question that hasn't been asked before
-    max_retries = 3
+    # Try up to 5 times to generate a new unique question
+    max_retries = 5
     question_id = None
     question_text = None
     
@@ -296,8 +336,14 @@ def ask_question_node(state: InterviewState) -> Dict:
         
         logger.info(f"Generated question (attempt {attempt + 1}/{max_retries}): {question_text[:100]}...")
         
-        # Save question to database (with deduplication)
+        # Check for duplicates BEFORE saving
         category = _classify_question_category(question_text)
+        if _is_duplicate_question(question_text, category):
+            logger.warning(f"Question is duplicate or too similar. Retrying... (attempt {attempt + 1}/{max_retries})")
+            question_text = None
+            continue
+        
+        # Save question to database (no duplicates at this point)
         experience = state.get("experience", "Mid-Level")
         question_id = _save_question_to_db(
             question_text=question_text,
@@ -307,9 +353,10 @@ def ask_question_node(state: InterviewState) -> Dict:
             topic=state.get("topic")
         )
         
-        # Check if this question was already asked to this user
-        if question_id and question_id in previously_asked_ids:
-            logger.warning(f"Question ID {question_id} was already asked to user {user_id}. Retrying...")
+        # Check if this question was already asked to this user in CURRENT SESSION
+        current_session_questions = state.get("asked_questions", [])
+        if question_text in current_session_questions:
+            logger.warning(f"Question was already asked in current session. Retrying... (attempt {attempt + 1}/{max_retries})")
             question_text = None
             question_id = None
             continue
@@ -337,7 +384,6 @@ def ask_question_node(state: InterviewState) -> Dict:
         )
     
     # Log that this question was asked to this user
-    session_id = state.get("session_id")
     if question_id and user_id:
         _log_question_asked(user_id, question_id, question_text, session_id)
     

@@ -1,10 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useInterview } from '../context/InterviewContext';
-import { useAuth0 } from '@auth0/auth0-react';
+import { useAuth } from '../hooks/useAuth';
 
 const ProfileMenu = () => {
     const { interview, user, navigateTo, updateUser, resetInterview } = useInterview();
-    const { logout } = useAuth0();
+    const { logout } = useAuth();
     const [isOpen, setIsOpen] = useState(false);
     const menuRef = useRef(null);
 
@@ -29,23 +29,31 @@ const ProfileMenu = () => {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
-    const handleLogout = () => {
+    const handleLogout = async () => {
         setIsOpen(false);
-        // Reset app state
-        updateUser({
-            name: 'Guest User',
-            email: null,
-            isLoggedIn: false,
-            isAdmin: false,
-            picture: null,
-        });
-        resetInterview();
-        // Log out from Auth0 and redirect to login page
-        logout({
-            logoutParams: {
-                returnTo: window.location.origin
-            }
-        });
+        
+        try {
+            // Clear all stored data
+            localStorage.clear();
+            sessionStorage.clear();
+            
+            // Reset app state
+            updateUser({
+                name: 'Guest User',
+                email: null,
+                isLoggedIn: false,
+                isAdmin: false,
+                picture: null,
+            });
+            resetInterview();
+            
+            // Call Auth0 logout
+            await logout();
+        } catch (error) {
+            console.error('Logout error:', error);
+            // Still navigate to login even if logout fails
+            navigateTo('login');
+        }
     };
 
     const handleProfile = () => {
