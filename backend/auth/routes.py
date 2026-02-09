@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException, status, Depends, Response, Request
 from pydantic import BaseModel
 from typing import Optional
 from backend.auth.auth0_utils import get_current_user, get_current_user_from_cookie, extract_user_info, verify_entra_id_token
+from backend.core.cosmos import users_container, serialize_for_cosmos
 from datetime import datetime, timedelta
 from collections import defaultdict
 import logging
@@ -49,6 +50,39 @@ def check_rate_limit(ip: str, endpoint: str) -> bool:
 # In-memory user storage (primary storage)
 in_memory_users = {}
 
+def _cache_user(user_data: dict) -> None:
+    """Cache user data in memory using auth0_sub as key."""
+    if not user_data:
+        return
+    user_sub = user_data.get("auth0_sub")
+    if user_sub:
+        in_memory_users[user_sub] = user_data
+
+def _find_user_in_memory(email: str) -> Optional[dict]:
+    """Find user in memory by email."""
+    for user in in_memory_users.values():
+        if user.get("email") == email:
+            return user
+    return None
+
+def _find_user_in_cosmos(email: str) -> Optional[dict]:
+    """Find user in Cosmos DB by email and cache result."""
+    try:
+        query = "SELECT * FROM users u WHERE u.email = @email"
+        items = list(users_container.query_items(
+            query=query,
+            parameters=[{"name": "@email", "value": email}],
+            enable_cross_partition_query=True,
+            max_item_count=1
+        ))
+        user = items[0] if items else None
+        if user:
+            _cache_user(user)
+        return user
+    except Exception as e:
+        logger.error(f"Error querying user by email from Cosmos DB: {e}")
+        return None
+
 # Pydantic models for request/response
 class UserInfo(BaseModel):
     sub: str
@@ -86,6 +120,12 @@ class RegisterResponse(BaseModel):
     user: UserResponse
     message: str = "User registered successfully"
 
+class AcceptInviteRequest(BaseModel):
+    invite_code: str
+
+class SyncUserResponse(BaseModel):
+    user: UserResponse
+
 @router.post("/register", response_model=RegisterResponse)
 def register(request: RegisterRequest, req: Request, response: Response):
     """
@@ -100,12 +140,8 @@ def register(request: RegisterRequest, req: Request, response: Response):
         )
     
     try:
-        # Check if user already exists in memory
-        existing_user = None
-        for user_data in in_memory_users.values():
-            if user_data.get("email") == request.email:
-                existing_user = user_data
-                break
+        # Check if user already exists in memory or Cosmos DB
+        existing_user = _find_user_in_memory(request.email) or _find_user_in_cosmos(request.email)
         
         if existing_user:
             logger.warning(f"User already exists: {request.email}")
@@ -135,7 +171,14 @@ def register(request: RegisterRequest, req: Request, response: Response):
             "updated_at": datetime.utcnow()
         }
         
-        in_memory_users[user_sub] = user_data
+        # Persist to Cosmos DB and cache in memory
+        cosmos_user = {
+            **user_data,
+            "user_id": user_id,
+            "id": user_id
+        }
+        users_container.upsert_item(serialize_for_cosmos(cosmos_user))
+        _cache_user(user_data)
         logger.info(f"✅ Created local user: {user_id} ({request.email})")
         
         # Generate access token
@@ -178,6 +221,202 @@ def register(request: RegisterRequest, req: Request, response: Response):
             detail="Registration failed. Please try again."
         )
 
+@router.post("/accept-invite")
+def accept_invite(request: AcceptInviteRequest, auth0_user: dict = Depends(get_current_user)):
+    """Mark an invite as used and persist the Auth0 user in Cosmos DB."""
+    invite_code = request.invite_code
+    if not invite_code:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invite_code is required")
+
+    user_info = extract_user_info(auth0_user)
+    user_email = user_info.get("email", "").lower()
+    user_name = user_info.get("full_name") or user_info.get("email")
+    user_sub = user_info.get("auth0_sub")
+
+    if not user_email or not user_sub:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid Auth0 user data")
+
+    try:
+        from backend.core.cosmos import client
+        from azure.cosmos.partition_key import PartitionKey
+
+        db = client.get_database_client("interviewer")
+
+        try:
+            invites_container = db.get_container_client("invites")
+        except Exception:
+            invites_container = db.create_container(
+                id="invites",
+                partition_key=PartitionKey(path="/invite_code")
+            )
+
+        query = "SELECT * FROM invites WHERE invites.invite_code = @code"
+        items = list(invites_container.query_items(
+            query=query,
+            parameters=[{"name": "@code", "value": invite_code}],
+            max_item_count=1
+        ))
+
+        if not items:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invite not found")
+
+        invite = items[0]
+        if invite.get("status") in {"used", "expired"}:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invite is no longer valid")
+        if not invite.get("access_enabled", True):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invite access disabled")
+
+        invited_email = (invite.get("candidate_email") or "").lower()
+        if invited_email and invited_email != user_email:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invite email mismatch")
+
+        now_iso = datetime.utcnow().isoformat()
+
+        # Create or update user record in Cosmos DB
+        user_query = "SELECT * FROM users WHERE users.user_id = @id"
+        user_items = list(users_container.query_items(
+            query=user_query,
+            parameters=[{"name": "@id", "value": user_sub}],
+            max_item_count=1,
+            enable_cross_partition_query=True
+        ))
+
+        user_doc = {
+            "id": user_sub,
+            "user_id": user_sub,
+            "auth0_sub": user_sub,
+            "user_name": user_name,
+            "user_email": user_email,
+            "role": invite.get("role"),
+            "seniority_level": invite.get("seniority_level"),
+            "job_description": invite.get("job_description"),
+            "invite_code": invite_code,
+            "invite_status": "accepted",
+            "auth_provider": "auth0",
+            "is_admin": user_email.endswith("@accellor.com"),
+            "is_active": True,
+            "access_enabled": True,
+            "invited_by_admin": True,
+            "registered_at": now_iso,
+            "updated_at": now_iso
+        }
+
+        if user_items:
+            existing_user = user_items[0]
+            user_doc["created_at"] = existing_user.get("created_at") or now_iso
+        else:
+            user_doc["created_at"] = now_iso
+
+        users_container.upsert_item(serialize_for_cosmos(user_doc))
+        _cache_user({
+            "id": user_sub,
+            "auth0_sub": user_sub,
+            "email": user_email,
+            "full_name": user_name,
+            "picture": user_info.get("picture"),
+            "is_admin": user_email.endswith("@accellor.com"),
+            "is_active": True,
+            "provider": "auth0",
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow()
+        })
+
+        invite["status"] = "used"
+        invite["access_enabled"] = False
+        invite["registered_at"] = now_iso
+        invite["user_id"] = user_sub
+        invite["auth0_user_id"] = user_sub
+        invites_container.replace_item(item=invite["id"], body=invite)
+
+        return {
+            "success": True,
+            "message": "Invite accepted",
+            "user": {
+                "id": user_sub,
+                "email": user_email,
+                "full_name": user_name,
+                "is_admin": user_email.endswith("@accellor.com"),
+                "is_active": True
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error accepting invite: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to accept invite")
+
+@router.post("/sync-user", response_model=SyncUserResponse)
+def sync_user(auth0_user: dict = Depends(get_current_user)):
+    """Sync Auth0 user profile into Cosmos DB for admin visibility."""
+    user_info = extract_user_info(auth0_user)
+    user_email = user_info.get("email", "").lower()
+    user_name = user_info.get("full_name") or user_info.get("email")
+    user_sub = user_info.get("auth0_sub")
+
+    if not user_email or not user_sub:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid Auth0 user data")
+
+    try:
+        now_iso = datetime.utcnow().isoformat()
+
+        user_query = "SELECT * FROM users WHERE users.user_id = @id"
+        user_items = list(users_container.query_items(
+            query=user_query,
+            parameters=[{"name": "@id", "value": user_sub}],
+            max_item_count=1,
+            enable_cross_partition_query=True
+        ))
+
+        user_doc = {
+            "id": user_sub,
+            "user_id": user_sub,
+            "auth0_sub": user_sub,
+            "user_name": user_name,
+            "user_email": user_email,
+            "auth_provider": "auth0",
+            "is_admin": user_email.endswith("@accellor.com"),
+            "is_active": True,
+            "access_enabled": True,
+            "updated_at": now_iso
+        }
+
+        if user_items:
+            existing_user = user_items[0]
+            user_doc["created_at"] = existing_user.get("created_at") or now_iso
+            user_doc["invite_code"] = existing_user.get("invite_code")
+            user_doc["invite_status"] = existing_user.get("invite_status")
+            user_doc["invited_by_admin"] = existing_user.get("invited_by_admin")
+        else:
+            user_doc["created_at"] = now_iso
+
+        users_container.upsert_item(serialize_for_cosmos(user_doc))
+        _cache_user({
+            "id": user_sub,
+            "auth0_sub": user_sub,
+            "email": user_email,
+            "full_name": user_name,
+            "picture": user_info.get("picture"),
+            "is_admin": user_email.endswith("@accellor.com"),
+            "is_active": True,
+            "provider": "auth0",
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow()
+        })
+
+        return {
+            "user": {
+                "id": user_sub,
+                "email": user_email,
+                "full_name": user_name,
+                "picture": user_info.get("picture"),
+                "is_admin": user_email.endswith("@accellor.com"),
+                "is_active": True
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error syncing user: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to sync user")
+
 @router.post("/login", response_model=LoginResponse)
 def login(request: LoginRequest, req: Request, response: Response):
     """
@@ -193,12 +432,10 @@ def login(request: LoginRequest, req: Request, response: Response):
         )
     
     try:
-        # Find user in memory
-        user_data = None
-        for user in in_memory_users.values():
-            if user.get("email") == request.email:
-                user_data = user
-                break
+        # Find user in memory or Cosmos DB
+        user_data = _find_user_in_memory(request.email)
+        if not user_data:
+            user_data = _find_user_in_cosmos(request.email)
         
         if not user_data:
             logger.warning(f"Login failed - user not found: {request.email}")

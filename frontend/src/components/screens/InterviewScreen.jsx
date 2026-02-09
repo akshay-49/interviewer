@@ -45,13 +45,15 @@ const InterviewScreen = () => {
     const allowRecordingRef = useRef(false);
 
     const [isSpeakingQuestion, setIsSpeakingQuestion] = useState(false);
-    // Auto-start interview if role and level are provided via params (from admin dashboard)
+    // Auto-start interview if role and level are provided via params
     useEffect(() => {
         if (currentParams?.role && currentParams?.level && !interview.sessionId) {
             console.log('Auto-starting interview with role:', currentParams.role, 'level:', currentParams.level);
             const startAutoInterview = async () => {
                 try {
-                    const result = await api.startInterview(currentParams.role, currentParams.level, '', 'strict');
+                    const roleDescription = currentParams.jobDescription || '';
+                    const persona = currentParams.persona || 'strict';
+                    const result = await api.startInterview(currentParams.role, currentParams.level, roleDescription, persona);
                     if (result) {
                         console.log('Interview started:', result);
                         updateInterview({
@@ -61,6 +63,8 @@ const InterviewScreen = () => {
                             userName: result.user_name || localStorage.getItem('user_name'),
                             role: currentParams.role,
                             experience: currentParams.level,
+                            roleDescription,
+                            persona,
                             questionNumber: 1,
                             totalQuestions: result.total_questions || 5
                         });

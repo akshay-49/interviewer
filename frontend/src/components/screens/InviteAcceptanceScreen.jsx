@@ -1,14 +1,14 @@
 import React, { useEffect, useState } from 'react';
+import { useAuth0 } from '@auth0/auth0-react';
 import { useInterview } from '../../context/InterviewContext';
 
 const InviteAcceptanceScreen = ({ inviteCode }) => {
-    const { navigateTo, updateUser } = useInterview();
+    const { navigateTo } = useInterview();
+    const { loginWithRedirect } = useAuth0();
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [inviteData, setInviteData] = useState(null);
     const [startingInterview, setStartingInterview] = useState(false);
-    const [password, setPassword] = useState('');
-    const [showPasswordInput, setShowPasswordInput] = useState(false);
 
     useEffect(() => {
         const validateInvite = async () => {
@@ -38,90 +38,40 @@ const InviteAcceptanceScreen = ({ inviteCode }) => {
         }
     }, [inviteCode]);
 
-    const handleStartInterview = async () => {
-        if (!password || password.length < 8) {
-            setError('Password must be at least 8 characters');
-            return;
-        }
-
+    const handleSignUp = async () => {
         setStartingInterview(true);
         setError('');
-        
+
         try {
-            // First register user in Auth0
-            const registerResponse = await fetch('http://localhost:8000/auth/register', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    email: inviteData.candidate_email,
-                    password: password,
-                    name: inviteData.candidate_name
-                })
-            });
-
-            if (!registerResponse.ok) {
-                const errorData = await registerResponse.json();
-                throw new Error(errorData.detail || 'Failed to register user in Auth0');
+            if (inviteCode) {
+                localStorage.setItem('invite_code', inviteCode);
             }
 
-            const registerData = await registerResponse.json();
-            const auth0UserId = registerData.user.id;
-
-            // Then register invited user to mark invite as used
-            const inviteRegisterResponse = await fetch('http://localhost:8000/admin/register-invited-user', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    invite_code: inviteCode,
-                    password: password
-                })
-            });
-            
-            if (!inviteRegisterResponse.ok) {
-                console.warn('Failed to mark invite as used, but user is registered');
+            if (inviteData) {
+                const invitePayload = {
+                    role: inviteData.role || 'Software Engineer',
+                    level: inviteData.seniority_level || 'Mid-Level',
+                    jobDescription: inviteData.job_description || '',
+                    persona: 'strict'
+                };
+                localStorage.setItem('invite_payload', JSON.stringify(invitePayload));
+                localStorage.setItem('job_title', invitePayload.role);
+                localStorage.setItem('experience_level', invitePayload.level);
             }
 
-            const inviteRegisterData = inviteRegisterResponse.ok ? await inviteRegisterResponse.json() : {};
-            
-            // Create user session from auth0 registration
-            const userData = {
-                id: auth0UserId,
-                auth0_user_id: auth0UserId,
-                full_name: inviteData.candidate_name,
-                email: inviteData.candidate_email,
-                job_title: inviteData.role,
-                level: inviteData.seniority_level,
-                is_invited: true,
-                invite_code: inviteCode
-            };
-
-            // Save to localStorage (no token - using httpOnly cookie)
-            localStorage.setItem('user', JSON.stringify(userData));
-            localStorage.setItem('user_id', registerData.user_id);
-            localStorage.setItem('user_email', inviteData.candidate_email);
-            localStorage.setItem('user_name', inviteData.candidate_name);
-            localStorage.setItem('job_title', inviteData.role);
-            
-            // Store token in sessionStorage as fallback (cleared when browser closes)
-            if (registerData.access_token) {
-                sessionStorage.setItem('access_token', registerData.access_token);
-            }
-            
-            // Update context with proper field names
-            updateUser({
-                name: inviteData.candidate_name,
-                email: inviteData.candidate_email,
-                isLoggedIn: true,
-                isAdmin: false,
+            await loginWithRedirect({
+                authorizationParams: {
+                    screen_hint: 'signup',
+                    login_hint: inviteData?.candidate_email,
+                    audience: import.meta.env.VITE_AUTH0_AUDIENCE,
+                    scope: 'openid profile email',
+                    prompt: 'login',
+                },
+                appState: { invite_code: inviteCode }
             });
-
-            // Redirect to setup
-            setTimeout(() => {
-                navigateTo('setup');
-            }, 1000);
         } catch (err) {
-            console.error('Error starting interview:', err);
-            setError(err.message || 'Failed to start interview');
+            console.error('Error starting sign up:', err);
+            setError(err.message || 'Failed to start sign up');
             setStartingInterview(false);
         }
     };
@@ -270,11 +220,11 @@ const InviteAcceptanceScreen = ({ inviteCode }) => {
                     </div>
                 </div>
 
-                {/* Password Setup Section */}
+                {/* Sign Up Section */}
                 <div className="bg-white rounded-xl border border-[#cfe4e7] p-6 md:p-8 flex flex-col gap-6 shadow-sm">
                     <div>
-                        <h2 className="text-[#0d191b] text-2xl font-bold leading-tight">Create Your Password</h2>
-                        <p className="text-gray-500 mt-1">Set a secure password to access your account.</p>
+                        <h2 className="text-[#0d191b] text-2xl font-bold leading-tight">Create Your Account</h2>
+                        <p className="text-gray-500 mt-1">You'll be redirected to Auth0 to complete your sign up.</p>
                     </div>
                     {error && (
                         <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex gap-3">
@@ -282,28 +232,21 @@ const InviteAcceptanceScreen = ({ inviteCode }) => {
                             <p className="text-red-700 text-sm">{error}</p>
                         </div>
                     )}
-                    <input
-                        type="password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        placeholder="Enter a secure password (minimum 8 characters)"
-                        className="w-full px-4 py-3 rounded-lg border border-[#cfe4e7] bg-white text-[#0d191b] placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                    />
                     <p className="text-gray-500 text-sm">
-                        Your password will be used to create your secure account in our system.
+                        We will prefill your email address and validate your invite during sign up.
                     </p>
                 </div>
 
                 {/* CTA Section */}
                 <div className="flex flex-col items-center gap-4 py-6">
                     <button
-                        onClick={handleStartInterview}
+                        onClick={handleSignUp}
                         disabled={startingInterview}
                         className="w-full md:w-auto min-w-[320px] px-10 py-4 bg-primary text-[#0d191b] text-lg font-black rounded-xl shadow-lg hover:shadow-primary/30 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                        {startingInterview ? 'Starting Interview...' : 'Get Started'}
+                        {startingInterview ? 'Redirecting...' : 'Continue to Sign Up'}
                     </button>
-                    <p className="text-gray-400 text-xs">By clicking "Get Started", you agree to our Terms of Service and Privacy Policy.</p>
+                    <p className="text-gray-400 text-xs">By clicking "Continue to Sign Up", you agree to our Terms of Service and Privacy Policy.</p>
                 </div>
             </main>
 

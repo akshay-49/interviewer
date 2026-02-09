@@ -31,7 +31,6 @@ from backend.interview.recording_routes import router as recording_router
 from backend.interview.history_routes import router as history_router
 from backend.core.cosmos import init_cosmos_db
 from backend.interview.enhanced_session_manager import SessionManager
-from backend.core.auth0_manager import Auth0Manager
 
 # Configure logging
 logging.basicConfig(
@@ -889,7 +888,7 @@ def get_all_users_from_cosmos():
                 "full_name": item.get("user_name"),
                 "is_active": item.get("is_active", True),
                 "is_admin": item.get("is_admin", item.get("user_email", "").endswith("@accellor.com")),
-                "auth_provider": item.get("auth_provider", "auth0"),
+                "auth_provider": item.get("auth_provider", "local"),
                 "created_at": created_at,
                 "job_title": item.get("job_title"),
                 "company_name": item.get("company_name"),
@@ -976,7 +975,7 @@ def update_user_active_status(req: dict):
 
 @app.post("/admin/send-invite")
 def send_invite(req: dict):
-    """Send interview invite to a candidate and create user in Cosmos DB"""
+    """Send interview invite to a candidate and store only the invite record"""
     candidate_name = req.get("fullName")
     candidate_email = req.get("email")
     role = req.get("role", "")
@@ -1003,42 +1002,41 @@ def send_invite(req: dict):
                 partition_key=PartitionKey(path="/invite_code")
             )
         
-        # Get users container
-        try:
-            users_container = db.get_container_client("users")
-        except Exception:
-            users_container = db.create_container(
-                id="users",
-                partition_key=PartitionKey(path="/user_id")
-            )
-        
         # Generate unique invite code
+        # Avoid creating duplicate active invites for the same email
+        existing_query = (
+            "SELECT * FROM invites i "
+            "WHERE i.candidate_email = @email "
+            "AND i.access_enabled = true "
+            "AND i.status != 'used' "
+            "AND i.status != 'expired' "
+            "ORDER BY i.created_at DESC"
+        )
+        existing_items = list(invites_container.query_items(
+            query=existing_query,
+            parameters=[{"name": "@email", "value": candidate_email}],
+            max_item_count=1,
+            enable_cross_partition_query=True
+        ))
+
+        if existing_items:
+            existing_invite = existing_items[0]
+            existing_code = existing_invite.get("invite_code")
+            invite_link = f"http://localhost:5173/invite/{existing_code}"
+            return {
+                "success": True,
+                "message": f"Active invite already exists for {candidate_email}.",
+                "invite_code": existing_code,
+                "invite_link": invite_link,
+                "existing": True
+            }
+
         invite_code = secrets.token_urlsafe(32)
-        user_id = str(uuid4())
-        
-        # Create user record in Cosmos DB users container
-        user_doc = {
-            "id": user_id,
-            "user_id": user_id,
-            "name": candidate_name,
-            "email": candidate_email,
-            "role": role,
-            "seniority_level": seniority_level,
-            "job_description": job_description,
-            "created_at": datetime.utcnow().isoformat(),
-            "invite_code": invite_code,
-            "invite_status": "sent",
-            "interview_completed": False,
-            "invited_by_admin": True,
-            "access_enabled": True
-        }
-        users_container.create_item(user_doc)
         
         # Store invite record in invites container (for tracking)
         invite_doc = {
             "id": str(uuid4()),
             "invite_code": invite_code,
-            "user_id": user_id,
             "candidate_name": candidate_name,
             "candidate_email": candidate_email,
             "role": role,
@@ -1052,9 +1050,57 @@ def send_invite(req: dict):
         invites_container.create_item(invite_doc)
         
         # Generate invite link
-        invite_link = f"http://localhost:5173/invite/{invite_code}"
+        invite_base_url = os.getenv("INVITE_BASE_URL", "http://localhost:5173").rstrip("/")
+        invite_link = f"{invite_base_url}/invite/{invite_code}"
+
+        # Send invite email via Mailgun if configured
+        mailgun_api_key = os.getenv("MAILGUN_API_KEY")
+        mailgun_domain = os.getenv("MAILGUN_DOMAIN")
+        mailgun_from = os.getenv("MAILGUN_FROM")
+        mailgun_base_url = os.getenv("MAILGUN_BASE_URL", "https://api.mailgun.net")
+
+        if mailgun_api_key and mailgun_domain and mailgun_from:
+            subject = f"You're invited to an interview - {role or 'Interview'}"
+            text_body = (
+                f"Hi {candidate_name},\n\n"
+                f"You've been invited to an interview.\n"
+                f"Role: {role or 'Interview'}\n"
+                f"Level: {seniority_level}\n\n"
+                f"Invite link:\n{invite_link}\n\n"
+                "If you did not expect this invite, you can ignore this email."
+            )
+            html_body = (
+                f"<p>Hi {candidate_name},</p>"
+                "<p>You've been invited to an interview.</p>"
+                f"<p><strong>Role:</strong> {role or 'Interview'}<br/>"
+                f"<strong>Level:</strong> {seniority_level}</p>"
+                f"<p><strong>Invite link:</strong> "
+                f"<a href=\"{invite_link}\">{invite_link}</a></p>"
+                "<p>If you did not expect this invite, you can ignore this email.</p>"
+            )
+
+            try:
+                mailgun_url = f"{mailgun_base_url.rstrip('/')}/v3/{mailgun_domain}/messages"
+                response = requests.post(
+                    mailgun_url,
+                    auth=("api", mailgun_api_key),
+                    data={
+                        "from": mailgun_from,
+                        "to": [candidate_email],
+                        "subject": subject,
+                        "text": text_body,
+                        "html": html_body
+                    },
+                    timeout=10
+                )
+                if response.status_code >= 400:
+                    logger.warning(f"Mailgun send failed: {response.status_code} - {response.text}")
+            except Exception as e:
+                logger.warning(f"Mailgun send error: {e}")
+        else:
+            logger.info("Mailgun not configured; skipping invite email.")
         
-        # Log the invite link (no email service)
+        # Log the invite link for debugging
         logger.info(f"📧 INVITE LINK FOR {candidate_name} ({candidate_email}): {invite_link}")
         logger.info(f"📧 Role: {seniority_level} | Position: {role}")
         
@@ -1139,12 +1185,15 @@ def validate_invite(req: dict):
 
 @app.post("/admin/register-invited-user")
 def register_invited_user(req: dict):
-    """Register an invited user in Auth0 and update Cosmos DB"""
+    """Create Auth0 user and persist the invited user in Cosmos DB."""
     invite_code = req.get("invite_code")
     password = req.get("password")
     
-    if not invite_code or not password:
-        raise HTTPException(status_code=400, detail="invite_code and password are required")
+    if not invite_code:
+        raise HTTPException(status_code=400, detail="invite_code is required")
+
+    if not password or len(password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
     
     try:
         from backend.core.cosmos import client
@@ -1183,56 +1232,93 @@ def register_invited_user(req: dict):
             raise HTTPException(status_code=404, detail="Invite not found")
         
         invite = items[0]
+
+        if invite.get("status") in {"used", "expired"}:
+            raise HTTPException(status_code=400, detail="This invite is no longer valid")
         
         # Check if access is still enabled
         if not invite.get("access_enabled", True):
             raise HTTPException(status_code=403, detail="This invite is no longer active")
         
-        # Create user in Auth0
-        auth0 = Auth0Manager()
-        try:
-            auth0_user = auth0.create_user(
-                email=invite.get("candidate_email"),
-                password=password,
-                user_metadata={
-                    "job_title": invite.get("role"),
-                    "level": invite.get("seniority_level"),
-                    "invite_code": invite_code,
-                    "registered_at": datetime.utcnow().isoformat()
-                }
-            )
-            auth0_user_id = auth0_user.get("user_id")
-        except Exception as e:
-            # If Auth0 M2M is not configured, continue with registration using invite code
-            logger.warning(f"Auth0 user creation failed, using invite-based registration: {e}")
-            auth0_user_id = None
+        candidate_email = invite.get("candidate_email")
+        candidate_name = invite.get("candidate_name")
+
+        from backend.core.auth0_manager import Auth0Manager
+        auth0_manager = Auth0Manager()
+        auth0_user = auth0_manager.create_user(
+            candidate_email,
+            password,
+            user_metadata={
+                "name": candidate_name,
+                "role": invite.get("role"),
+                "seniority_level": invite.get("seniority_level"),
+                "job_description": invite.get("job_description")
+            },
+            app_metadata={
+                "invite_code": invite_code
+            }
+        )
+
+        auth0_user_id = auth0_user.get("user_id") if auth0_user else None
+        if not auth0_user_id:
+            raise HTTPException(status_code=500, detail="Failed to create Auth0 user")
+
+        # Create or update user record in Cosmos DB
+        user_query = "SELECT * FROM users WHERE users.user_email = @email"
+        user_items = list(users_container.query_items(
+            query=user_query,
+            parameters=[{"name": "@email", "value": candidate_email}],
+            max_item_count=1,
+            enable_cross_partition_query=True
+        ))
+
+        user_doc = {
+            "id": auth0_user_id,
+            "user_id": auth0_user_id,
+            "auth0_sub": auth0_user_id,
+            "user_name": candidate_name,
+            "user_email": candidate_email,
+            "role": invite.get("role"),
+            "seniority_level": invite.get("seniority_level"),
+            "job_description": invite.get("job_description"),
+            "invite_code": invite_code,
+            "invite_status": "accepted",
+            "auth_provider": "auth0",
+            "is_admin": candidate_email.lower().endswith("@accellor.com"),
+            "is_active": True,
+            "access_enabled": True,
+            "invited_by_admin": True,
+            "created_at": datetime.utcnow().isoformat(),
+            "registered_at": datetime.utcnow().isoformat()
+        }
+
+        if user_items:
+            existing_user = user_items[0]
+            existing_user.update(user_doc)
+            users_container.replace_item(item=existing_user["id"], body=existing_user)
+        else:
+            users_container.create_item(user_doc)
         
-        # Update user record in Cosmos DB with Auth0 user_id
-        user_id = invite.get("user_id")
-        if user_id:
-            user_query = "SELECT * FROM users WHERE users.user_id = @id"
-            user_items = list(users_container.query_items(
-                query=user_query,
-                parameters=[{"name": "@id", "value": user_id}],
-                max_item_count=1,
-                enable_cross_partition_query=True
-            ))
-            
-            if user_items:
-                user = user_items[0]
-                if auth0_user_id:
-                    user["auth0_user_id"] = auth0_user_id
-                user["auth0_email"] = invite.get("candidate_email")
-                user["registered_at"] = datetime.utcnow().isoformat()
-                users_container.replace_item(item=user["id"], body=user)
+        # Mark invite as used
+        invite["status"] = "used"
+        invite["access_enabled"] = False
+        invite["registered_at"] = datetime.utcnow().isoformat()
+        invite["user_id"] = auth0_user_id
+        invite["auth0_user_id"] = auth0_user_id
+        invites_container.replace_item(item=invite["id"], body=invite)
         
-        logger.info(f"✅ Registered invited user: {user_id} (Auth0 ID: {auth0_user_id or 'N/A'})")
+        logger.info(f"✅ Registered invited user: {auth0_user_id}")
         
         return {
             "success": True,
             "message": "User registered successfully",
-            "user_id": user_id,
-            "auth0_user_id": auth0_user_id
+            "user": {
+                "id": auth0_user_id,
+                "email": candidate_email,
+                "full_name": candidate_name,
+                "is_admin": candidate_email.lower().endswith("@accellor.com"),
+                "is_active": True
+            }
         }
     except HTTPException:
         raise

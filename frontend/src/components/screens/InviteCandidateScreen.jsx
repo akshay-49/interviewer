@@ -19,6 +19,7 @@ const InviteCandidateScreen = () => {
         pending: 0,
         activeLinks: 0
     });
+    const [submitting, setSubmitting] = useState(false);
 
     // Fetch invitations from backend
     useEffect(() => {
@@ -59,6 +60,12 @@ const InviteCandidateScreen = () => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+
+        if (submitting) {
+            return;
+        }
+
+        setSubmitting(true);
         
         try {
             const response = await fetch('http://localhost:8000/admin/send-invite', {
@@ -95,6 +102,8 @@ const InviteCandidateScreen = () => {
         } catch (error) {
             console.error('Error sending invite:', error);
             alert('Failed to send invite. Please try again.');
+        } finally {
+            setSubmitting(false);
         }
     };
 
@@ -260,10 +269,11 @@ const InviteCandidateScreen = () => {
 
                             <button 
                                 type="submit"
-                                className="w-full h-14 bg-primary text-white font-bold rounded-lg shadow-lg shadow-primary/20 hover:scale-[1.01] active:scale-[0.99] transition-all flex items-center justify-center gap-2 text-lg mt-2"
+                                disabled={submitting}
+                                className="w-full h-14 bg-primary text-white font-bold rounded-lg shadow-lg shadow-primary/20 hover:scale-[1.01] active:scale-[0.99] transition-all flex items-center justify-center gap-2 text-lg mt-2 disabled:opacity-60 disabled:cursor-not-allowed"
                             >
                                 <span className="material-symbols-outlined">send</span>
-                                Send Invitation
+                                {submitting ? 'Sending...' : 'Send Invitation'}
                             </button>
                         </form>
                     </aside>

@@ -16,8 +16,8 @@ import InviteCandidateScreen from './screens/InviteCandidateScreen';
 import UserSessionsScreen from './screens/UserSessionsScreen';
 import InviteAcceptanceScreen from './screens/InviteAcceptanceScreen';
 import CustomLoginScreen from './screens/CustomLoginScreen';
-import CallbackPage from './screens/CallbackPage';
 import AdminLoginScreen from './screens/AdminLoginScreen';
+import CallbackPage from './screens/CallbackPage';
 
 const ScreenManager = () => {
     const { currentScreen, currentParams, theme, toggleTheme, navigateTo, interview, resetInterview } = useInterview();
@@ -41,6 +41,12 @@ const ScreenManager = () => {
             return;
         }
         
+        // Check for Auth0 callback route
+        if (path === '/callback') {
+            navigateTo('callback');
+            return;
+        }
+
         // Check for invite code
         const inviteMatch = path.match(/\/invite\/([^/]+)/);
         if (inviteMatch) {
@@ -55,8 +61,6 @@ const ScreenManager = () => {
                 return <LoginScreen />;
             case 'admin-login':
                 return <AdminLoginScreen />;
-            case 'callback':
-                return <CallbackPage />;
             case 'custom-login':
                 return <CustomLoginScreen />;
             case 'signup':
@@ -85,6 +89,8 @@ const ScreenManager = () => {
                 return <UserSessionsScreen />;
             case 'invite-acceptance':
                 return <InviteAcceptanceScreen inviteCode={currentParams?.invite_code} />;
+            case 'callback':
+                return <CallbackPage />;
             default:
                 return <LoginScreen />;
         }
@@ -109,7 +115,7 @@ const ScreenManager = () => {
     };
 
     // Check if we're on an auth screen
-    const isAuthScreen = ['login', 'signup', 'forgot-password', 'custom-login'].includes(currentScreen);
+    const isAuthScreen = ['login', 'signup', 'forgot-password', 'custom-login', 'callback'].includes(currentScreen);
     const isAdminScreen = ['admin-dashboard', 'invite-candidate'].includes(currentScreen);
     const isInviteScreen = currentScreen === 'invite-acceptance';
     const showProfileMenu = !['admin-login', 'admin-dashboard', 'invite-candidate'].includes(currentScreen);
