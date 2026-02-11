@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { useInterview } from '../../context/InterviewContext';
-import { playAudioFromBase64 } from '../../utils/api';
+import { playAudioFromBase64, historyApi } from '../../utils/api';
 import { QAReviewCard } from '../QAReviewCard';
 import html2pdf from 'html2pdf.js';
 
@@ -8,17 +8,70 @@ const ResultsScreen = () => {
     const { interview, navigateTo, theme, toggleTheme } = useInterview();
     const audioPlayedRef = useRef(false);
     const contentRef = useRef(null);
+    const saveAttemptedRef = useRef(false);
 
     const summary = interview.summary || {};
     const whatWentWell = summary.what_went_well || [];
     const areasForImprovement = summary.areas_for_improvement || [];
 
+    // Save session results to Cosmos DB when component mounts
+    useEffect(() => {
+        if (!saveAttemptedRef.current && interview.sessionId && interview.summary) {
+            saveAttemptedRef.current = true;
+            saveSessionResults();
+        }
+    }, [interview.sessionId, interview.summary]);
+
+    const saveSessionResults = async () => {
+        try {
+            console.log('Saving session results to Cosmos DB...');
+            
+            // Calculate duration in seconds
+            const now = new Date();
+            const startTime = interview.startedAt ? new Date(interview.startedAt) : now;
+            const durationSeconds = Math.round((now - startTime) / 1000);
+            
+            const sessionData = {
+                session_id: interview.sessionId,
+                user_id: interview.userId || 'anonymous',
+                user_email: interview.userEmail || 'unknown@example.com',
+                user_name: interview.userName,
+                job_title: interview.jobTitle,
+                company_name: interview.companyName,
+                summary: interview.summary,
+                overall_score: (interview.answers?.length > 0) 
+                    ? interview.summary.average_score || 0 
+                    : 0,
+                hints_used: interview.hintsUsed || 0,
+                questions_skipped: interview.questionsSkipped || 0,
+                total_questions: interview.totalQuestions || 0,
+                answers: interview.answers || [],
+                question_wise_feedback: interview.questionWiseFeedback || [],
+                started_at: interview.startedAt || now.toISOString(),
+                completed_at: now.toISOString(),
+                duration_seconds: durationSeconds
+            };
+            
+            console.log('Session data to save:', sessionData);
+            
+            const result = await historyApi.saveSessionResults(sessionData);
+            console.log('Session saved successfully:', result);
+        } catch (error) {
+            console.error('Failed to save session results:', error);
+            // Don't block UI if saving fails
+        }
+    };
+
     // Debug logging
     useEffect(() => {
         console.log('ResultsScreen mounted with interview:', interview);
+        console.log('questionWiseFeedback:', interview.questionWiseFeedback);
+        console.log('questionWiseFeedback length:', interview.questionWiseFeedback?.length);
+        if (interview.questionWiseFeedback && interview.questionWiseFeedback.length > 0) {
+            console.log('First feedback item:', interview.questionWiseFeedback[0]);
+        }
         console.log('hintsUsed:', interview.hintsUsed);
         console.log('questionsSkipped:', interview.questionsSkipped);
-        console.log('questionWiseFeedback:', interview.questionWiseFeedback);
     }, [interview]);
 
     // Play closing audio when component mounts

@@ -1,8 +1,16 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useInterview } from '../context/InterviewContext';
+<<<<<<< HEAD
 
 const ProfileMenu = () => {
     const { interview, user, navigateTo } = useInterview();
+=======
+import { useAuth } from '../hooks/useAuth';
+
+const ProfileMenu = () => {
+    const { interview, user, navigateTo, updateUser, resetInterview } = useInterview();
+    const { logout } = useAuth();
+>>>>>>> two
     const [isOpen, setIsOpen] = useState(false);
     const menuRef = useRef(null);
 
@@ -27,16 +35,48 @@ const ProfileMenu = () => {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
+<<<<<<< HEAD
     const handleLogout = () => {
         setIsOpen(false);
         // Reset user state and navigate to login
         navigateTo('login');
+=======
+    const handleLogout = async () => {
+        setIsOpen(false);
+        
+        try {
+            // Clear all stored data
+            localStorage.clear();
+            sessionStorage.clear();
+            
+            // Reset app state
+            updateUser({
+                name: 'Guest User',
+                email: null,
+                isLoggedIn: false,
+                isAdmin: false,
+                picture: null,
+            });
+            resetInterview();
+            
+            // Call Auth0 logout
+            await logout();
+        } catch (error) {
+            console.error('Logout error:', error);
+            // Still navigate to login even if logout fails
+            navigateTo('login');
+        }
+>>>>>>> two
     };
 
     const handleProfile = () => {
         setIsOpen(false);
+<<<<<<< HEAD
         // TODO: Navigate to profile page once implemented
         console.log('Profile clicked - feature coming soon');
+=======
+        navigateTo('profile');
+>>>>>>> two
     };
 
     const handleHistory = () => {

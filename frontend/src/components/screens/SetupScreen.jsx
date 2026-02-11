@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useInterview } from '../../context/InterviewContext';
-import { api, speakText } from '../../utils/api';
+import { api, speakText, historyApi } from '../../utils/api';
 
 const SetupScreen = () => {
-    const { navigateTo, updateInterview, resetInterview, backendAvailable, theme, toggleTheme } = useInterview();
+    const { navigateTo, updateInterview, resetInterview, backendAvailable, theme, toggleTheme, user, updateUser } = useInterview();
     const [formData, setFormData] = useState({
         role: '',
         experience: '',
@@ -19,6 +19,62 @@ const SetupScreen = () => {
 
     const roles = ['Frontend Developer', 'Backend Developer', 'Full Stack Engineer', 'DevOps Engineer', 'Product Manager', 'Solutions Architect', 'Security Engineer', 'Data Engineer', 'QA Engineer'];
     const experiences = ['Intern', 'Junior', 'Mid-Level', 'Senior', 'Staff', 'Principal', 'Entry-level'];
+
+    // Auto-fill role and experience from user profile on mount
+    useEffect(() => {
+        let isActive = true;
+
+        const loadProfile = async () => {
+            let currentUser = user;
+            if (!currentUser?.id) {
+                try {
+                    const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+                    const response = await fetch(`${apiBaseUrl}/auth/me`, {
+                        credentials: 'include'
+                    });
+                    if (response.ok) {
+                        const profile = await response.json();
+                        currentUser = {
+                            id: profile.id,
+                            name: profile.full_name || profile.email,
+                            email: profile.email,
+                            isLoggedIn: true,
+                            isAdmin: profile.email?.endsWith('@accellor.com') || false,
+                            picture: profile.picture,
+                        };
+                        updateUser(currentUser);
+                    }
+                } catch (error) {
+                    console.warn('Failed to load auth profile:', error);
+                }
+            }
+
+            if (!currentUser?.id) {
+                return;
+            }
+
+            try {
+                const profile = await historyApi.getUserProfile(currentUser.id);
+                if (!isActive || !profile) {
+                    return;
+                }
+
+                setFormData(prev => ({
+                    ...prev,
+                    role: prev.role || profile.job_title || '',
+                    experience: prev.experience || profile.experience_level || ''
+                }));
+            } catch (error) {
+                console.warn('Failed to load profile for autofill:', error);
+            }
+        };
+
+        loadProfile();
+
+        return () => {
+            isActive = false;
+        };
+    }, [updateUser, user]);
 
     // Close dropdowns when clicking outside
     useEffect(() => {
@@ -107,14 +163,21 @@ const SetupScreen = () => {
 
             updateInterview({
                 sessionId: result.session_id,
+                userId: user?.id || 'anonymous',
+                userEmail: user?.email || 'unknown@example.com',
+                userName: user?.name,
+                jobTitle: role,
+                companyName: '',
                 currentQuestion: result.question,
                 questionNumber: 1,
+                totalQuestions: result.total_questions || 5,
                 role,
                 experience,
                 roleDescription: formData.jobDescription || '',
                 persona: formData.persona === 'coach' ? 'coach' : 'strict',
                 roleDisplay,
                 questionText: result.question,
+                startedAt: new Date().toISOString(),
             });
 
             console.log('Interview started successfully!');

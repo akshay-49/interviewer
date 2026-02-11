@@ -12,22 +12,55 @@ export const useInterview = () => {
 };
 
 export const InterviewProvider = ({ children }) => {
+<<<<<<< HEAD
     const [currentScreen, setCurrentScreen] = useState('login');
+=======
+    // Check if we're coming back from Microsoft redirect
+    const getInitialScreen = () => {
+        if (typeof window !== 'undefined') {
+            const adminLoginInProgress = sessionStorage.getItem('adminLoginInProgress');
+            if (adminLoginInProgress) {
+                return 'admin-login';
+            }
+        }
+        return 'login';
+    };
+    
+    const [currentScreen, setCurrentScreen] = useState(getInitialScreen);
+    const [currentParams, setCurrentParams] = useState(null);
+>>>>>>> two
     const [backendAvailable, setBackendAvailable] = useState(false);
     const stopRecordingCallbackRef = useRef(null);
 
-    // Theme selection (light/dark) with system + localStorage preference
+    // Theme selection (light/dark) with localStorage preference
     const getPreferredTheme = () => {
         const stored = typeof window !== 'undefined' ? localStorage.getItem('theme') : null;
         if (stored === 'light' || stored === 'dark') return stored;
-        const prefersDark = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-        return prefersDark ? 'dark' : 'light';
+        return 'light';
     };
 
     const [theme, setTheme] = useState(getPreferredTheme);
 
     // User state (for profile, login, etc.)
     const [user, setUser] = useState({
+        name: 'Guest User',
+        email: null,
+        isLoggedIn: false,
+    });
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const resetKey = 'theme_reset_v1';
+        if (!localStorage.getItem(resetKey)) {
+            localStorage.removeItem('theme');
+            localStorage.setItem(resetKey, '1');
+            setTheme('light');
+        }
+    }, []);
+
+    // User state (for profile, login, etc.)
+    const [user, setUser] = useState({
+        id: null,
         name: 'Guest User',
         email: null,
         isLoggedIn: false,
@@ -45,6 +78,11 @@ export const InterviewProvider = ({ children }) => {
 
     const [interview, setInterview] = useState({
         sessionId: null,
+        userId: null,
+        userEmail: null,
+        userName: null,
+        jobTitle: null,
+        companyName: null,
         role: null,
         roleDisplay: '',
         persona: 'strict',
@@ -62,6 +100,7 @@ export const InterviewProvider = ({ children }) => {
         hintsUsed: 0,
         questionsSkipped: 0,
         questionWiseFeedback: [],
+        startedAt: null,
     });
 
     // Check backend availability on mount
@@ -77,8 +116,15 @@ export const InterviewProvider = ({ children }) => {
     useEffect(() => {
         const handlePopState = (event) => {
             const screen = event.state?.screen || 'login';
+<<<<<<< HEAD
             stopAudioPlayback();
             setCurrentScreen(screen);
+=======
+            const params = event.state?.params || null;
+            stopAudioPlayback();
+            setCurrentScreen(screen);
+            setCurrentParams(params);
+>>>>>>> two
         };
 
         window.addEventListener('popstate', handlePopState);
@@ -87,10 +133,17 @@ export const InterviewProvider = ({ children }) => {
 
     // Push state to history when currentScreen changes
     useEffect(() => {
+<<<<<<< HEAD
         const state = { screen: currentScreen };
         const title = currentScreen.charAt(0).toUpperCase() + currentScreen.slice(1);
         window.history.pushState(state, title);
     }, [currentScreen]);
+=======
+        const state = { screen: currentScreen, params: currentParams };
+        const title = currentScreen.charAt(0).toUpperCase() + currentScreen.slice(1);
+        window.history.pushState(state, title);
+    }, [currentScreen, currentParams]);
+>>>>>>> two
 
     const updateInterview = (updates) => {
         setInterview(prev => ({ ...prev, ...updates }));
@@ -103,6 +156,11 @@ export const InterviewProvider = ({ children }) => {
     const resetInterview = () => {
         setInterview({
             sessionId: null,
+            userId: null,
+            userEmail: null,
+            userName: null,
+            jobTitle: null,
+            companyName: null,
             role: null,
             roleDisplay: '',
             persona: 'strict',
@@ -120,6 +178,7 @@ export const InterviewProvider = ({ children }) => {
             hintsUsed: 0,
             questionsSkipped: 0,
             questionWiseFeedback: [],
+            startedAt: null,
         });
     };
 
@@ -127,7 +186,11 @@ export const InterviewProvider = ({ children }) => {
         setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
     };
 
+<<<<<<< HEAD
     const navigateTo = (screen, replaceHistory = false) => {
+=======
+    const navigateTo = (screen, params = null, replaceHistory = false) => {
+>>>>>>> two
         // Stop recording if we're leaving the interview screen
         if (screen !== 'interview' && stopRecordingCallbackRef.current) {
             console.log('Navigating away from interview, stopping recording');
@@ -137,8 +200,14 @@ export const InterviewProvider = ({ children }) => {
         stopAudioPlayback();
         
         setCurrentScreen(screen);
+<<<<<<< HEAD
         
         const state = { screen };
+=======
+        setCurrentParams(params);
+        
+        const state = { screen, params };
+>>>>>>> two
         const title = screen.charAt(0).toUpperCase() + screen.slice(1);
         
         if (replaceHistory) {
@@ -152,6 +221,7 @@ export const InterviewProvider = ({ children }) => {
 
     const value = {
         currentScreen,
+        currentParams,
         backendAvailable,
         interview,
         updateInterview,

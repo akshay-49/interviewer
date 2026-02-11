@@ -1,7 +1,7 @@
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
-from backend.models import InterviewState
-from backend.nodes import (
+from backend.interview.models import InterviewState
+from backend.interview.nodes import (
     ask_question_node,
     await_answer_node,
     evaluate_node,

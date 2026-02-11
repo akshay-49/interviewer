@@ -43,12 +43,15 @@ class SpokenClosing(BaseModel):
 
 
 class InterviewState(TypedDict):
+    user_id: Optional[str]  # User ID for tracking
+    session_id: Optional[str]  # Session ID for tracking
     role: str
     experience: str
     persona: Optional[str]
     role_description: Optional[str]
 
     current_question: Optional[str]
+    current_question_id: Optional[str]  # Unique question ID
     last_answer_text: Optional[str]
 
     evaluation: Optional[Evaluation]
@@ -62,7 +65,7 @@ class InterviewState(TypedDict):
     question_count: int
     end_interview: bool
     asked_questions: List[str]
-
+    question_ids_asked: List[str]  # Track unique question IDs asked to user
     summary: Optional[Dict]
     spoken_closing: Optional[str]
     spoken_transition: Optional[str]

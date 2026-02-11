@@ -1,6 +1,7 @@
 """
 Configuration constants for the interview backend.
 """
+import os
 
 # Interview settings
 MAX_QUESTIONS = 5  # Total questions per interview
@@ -31,3 +32,6 @@ STRONG_ANSWER_THRESHOLD = 7.0  # Above this increases difficulty
 # Difficulty levels
 DIFFICULTY_EASY = "easy"
 DIFFICULTY_HARD = "hard"
+
+# Email settings
+MAILERSEND_API_KEY = os.getenv("MAILERSEND_API_KEY", "")

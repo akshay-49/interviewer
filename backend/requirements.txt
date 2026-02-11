@@ -8,5 +8,8 @@ langchain-openai
 langchain-ollama
 python-multipart
 pydantic
-python-dotenv
-requests
+pymongo
+azure-cosmos
+python-jose[cryptography]
+PyJWT
+bcrypt

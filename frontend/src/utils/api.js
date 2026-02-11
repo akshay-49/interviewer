@@ -34,7 +34,7 @@ export const api = {
     },
 
     // Submit an answer to the current question
-    async submitAnswer(sessionId, answer, skip = false) {
+    async submitAnswer(sessionId, answer, skip = false, recordingBlobUrl = null) {
         try {
             const response = await fetch(`${API_BASE_URL}/interview/answer`, {
                 method: 'POST',
@@ -44,7 +44,8 @@ export const api = {
                 body: JSON.stringify({
                     session_id: sessionId,
                     answer,
-                    skip
+                    skip,
+                    recording_blob_url: recordingBlobUrl
                 })
             });
             
@@ -190,6 +191,23 @@ export function playAudioFromBase64(base64Audio) {
             reject(error);
         }
     });
+<<<<<<< HEAD
+}
+
+// Stop any currently playing audio (base64 or Azure TTS)
+export function stopAudioPlayback() {
+    if (currentBase64Audio) {
+        try {
+            currentBase64Audio.pause();
+            currentBase64Audio.currentTime = 0;
+        } catch (e) {
+            console.warn('Error stopping base64 audio:', e);
+        }
+        currentBase64Audio = null;
+    }
+    stopSpeechPlayback();
+=======
+>>>>>>> two
 }
 
 // Stop any currently playing audio (base64 or Azure TTS)
@@ -206,3 +224,177 @@ export function stopAudioPlayback() {
     stopSpeechPlayback();
 }
 
+export const historyApi = {
+    // Save completed session results to Cosmos DB
+    async saveSessionResults(sessionData) {
+        try {
+            const response = await fetch(`${API_BASE_URL}/session/save-results`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                credentials: 'include',  // Send httpOnly cookie
+                body: JSON.stringify(sessionData)
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            return await response.json();
+        } catch (error) {
+            console.error('Failed to save session results:', error);
+            throw error;
+        }
+    },
+
+    // Get user session history from Cosmos DB
+    async getUserHistory(userId) {
+        try {
+            const response = await fetch(`${API_BASE_URL}/session/user-history`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                credentials: 'include',  // Send httpOnly cookie
+                body: JSON.stringify({ user_id: userId })
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            return data.sessions || [];
+        } catch (error) {
+            console.error('Failed to fetch user history:', error);
+            return [];
+        }
+    },
+
+    // Get all sessions for current user
+    async getUserSessions(limit = 50) {
+        try {
+            const response = await fetch(`${API_BASE_URL}/history/user-sessions?limit=${limit}`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                credentials: 'include'  // Send httpOnly cookie
+            });
+            
+            if (!response.ok) {
+                if (response.status === 401) {
+                    throw new Error('Unauthorized - please login');
+                }
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            return await response.json();
+        } catch (error) {
+            console.error('Failed to fetch user sessions:', error);
+            throw error;
+        }
+    },
+
+    // Save user profile to Cosmos DB
+    async saveUserProfile(profileData) {
+        try {
+            const response = await fetch(`${API_BASE_URL}/user/save-profile`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(profileData)
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            return await response.json();
+        } catch (error) {
+            console.error('Failed to save user profile:', error);
+            throw error;
+        }
+    },
+
+    // Get user profile from Cosmos DB
+    async getUserProfile(userId) {
+        try {
+            const response = await fetch(`${API_BASE_URL}/user/get-profile`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ user_id: userId })
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            return data.profile || null;
+        } catch (error) {
+            console.error('Failed to fetch user profile:', error);
+            return null;
+        }
+    },
+
+    // Get detailed session information
+    async getSessionDetails(sessionId) {
+        try {
+            const response = await fetch(`${API_BASE_URL}/history/session/${sessionId}`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                credentials: 'include'  // Send httpOnly cookie
+            });
+            
+            if (!response.ok) {
+                if (response.status === 404) {
+                    throw new Error('Session not found');
+                }
+                if (response.status === 403) {
+                    throw new Error('Unauthorized access to session');
+                }
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            return await response.json();
+        } catch (error) {
+            console.error('Failed to fetch session details:', error);
+            throw error;
+        }
+    },
+
+    // Delete a session
+    async deleteSession(sessionId) {
+        try {
+            const response = await fetch(`${API_BASE_URL}/history/session/${sessionId}`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                credentials: 'include'  // Send httpOnly cookie
+            });
+            
+            if (!response.ok) {
+                if (response.status === 404) {
+                    throw new Error('Session not found');
+                }
+                if (response.status === 403) {
+                    throw new Error('Unauthorized to delete session');
+                }
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            return await response.json();
+        } catch (error) {
+            console.error('Failed to delete session:', error);
+            throw error;
+        }
+    }
+};

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useInterview } from '../context/InterviewContext';
 import ProfileMenu from './ProfileMenu';
 import LoginScreen from './screens/LoginScreen';
@@ -8,16 +8,72 @@ import WelcomeScreen from './screens/WelcomeScreen';
 import SetupScreen from './screens/SetupScreen';
 import InterviewScreen from './screens/InterviewScreen';
 import HistoryScreen from './screens/HistoryScreen';
+<<<<<<< HEAD
 import ResultsScreen from './screens/ResultsScreen';
 import ReportScreen from './screens/ReportScreen';
 
 const ScreenManager = () => {
     const { currentScreen, theme, toggleTheme, navigateTo, interview, resetInterview } = useInterview();
+=======
+import ProfileScreen from './screens/ProfileScreen';
+import ResultsScreen from './screens/ResultsScreen';
+import ReportScreen from './screens/ReportScreen';
+import AdminDashboardScreen from './screens/AdminDashboardScreen';
+import InviteCandidateScreen from './screens/InviteCandidateScreen';
+import UserSessionsScreen from './screens/UserSessionsScreen';
+import InviteAcceptanceScreen from './screens/InviteAcceptanceScreen';
+import CustomLoginScreen from './screens/CustomLoginScreen';
+import AdminLoginScreen from './screens/AdminLoginScreen';
+import CallbackPage from './screens/CallbackPage';
+
+const ScreenManager = () => {
+    const { currentScreen, currentParams, theme, toggleTheme, navigateTo, interview, resetInterview } = useInterview();
+
+    // Check for special routes in URL on mount
+    useEffect(() => {
+        const path = window.location.pathname;
+        
+        // Check for admin login in progress (from Microsoft redirect) - check only once
+        const adminLoginInProgress = sessionStorage.getItem('adminLoginInProgress');
+        if (adminLoginInProgress && currentScreen !== 'admin-login' && currentScreen !== 'admin-dashboard') {
+            console.log('Admin login in progress detected, routing to admin-login');
+            navigateTo('admin-login');
+            return;
+        }
+        
+        // Check for admin route
+        if ((path === '/admin' || path === '/admin/') && currentScreen !== 'admin-login' && currentScreen !== 'admin-dashboard') {
+            console.log('Admin path detected, routing to admin-login');
+            navigateTo('admin-login');
+            return;
+        }
+        
+        // Check for Auth0 callback route
+        if (path === '/callback') {
+            navigateTo('callback');
+            return;
+        }
+
+        // Check for invite code
+        const inviteMatch = path.match(/\/invite\/([^/]+)/);
+        if (inviteMatch) {
+            const inviteCode = inviteMatch[1];
+            navigateTo('invite-acceptance', { invite_code: inviteCode });
+        }
+    }, []);
+>>>>>>> two
 
     const renderScreen = () => {
         switch (currentScreen) {
             case 'login':
                 return <LoginScreen />;
+<<<<<<< HEAD
+=======
+            case 'admin-login':
+                return <AdminLoginScreen />;
+            case 'custom-login':
+                return <CustomLoginScreen />;
+>>>>>>> two
             case 'signup':
                 return <SignupScreen />;
             case 'forgot-password':
@@ -30,10 +86,25 @@ const ScreenManager = () => {
                 return <InterviewScreen />;
             case 'history':
                 return <HistoryScreen />;
+<<<<<<< HEAD
+=======
+            case 'profile':
+                return <ProfileScreen />;
+>>>>>>> two
             case 'report':
                 return <ReportScreen />;
             case 'results':
                 return <ResultsScreen />;
+            case 'admin-dashboard':
+                return <AdminDashboardScreen />;
+            case 'invite-candidate':
+                return <InviteCandidateScreen />;
+            case 'user-sessions':
+                return <UserSessionsScreen />;
+            case 'invite-acceptance':
+                return <InviteAcceptanceScreen inviteCode={currentParams?.invite_code} />;
+            case 'callback':
+                return <CallbackPage />;
             default:
                 return <LoginScreen />;
         }
@@ -58,12 +129,23 @@ const ScreenManager = () => {
     };
 
     // Check if we're on an auth screen
+<<<<<<< HEAD
     const isAuthScreen = ['login', 'signup', 'forgot-password'].includes(currentScreen);
+=======
+    const isAuthScreen = ['login', 'signup', 'forgot-password', 'custom-login', 'callback'].includes(currentScreen);
+    const isAdminScreen = ['admin-dashboard', 'invite-candidate', 'user-sessions'].includes(currentScreen);
+    const isInviteScreen = currentScreen === 'invite-acceptance';
+    const showProfileMenu = !['admin-login', 'admin-dashboard', 'invite-candidate'].includes(currentScreen);
+>>>>>>> two
 
     return (
         <div className="w-screen h-screen flex flex-col">
             {/* Header */}
+<<<<<<< HEAD
             {isAuthScreen ? (
+=======
+            {isAdminScreen || isInviteScreen ? null : isAuthScreen ? (
+>>>>>>> two
                 // Minimal header for auth screens - just logo
                 <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-6 py-2 flex justify-start items-center flex-shrink-0">
                     <img src="/accellor-logo.svg" alt="Accellor" className="h-8" />
@@ -102,8 +184,13 @@ const ScreenManager = () => {
                         <div className="w-2 h-2 rounded-full bg-green-500"></div>
                     </div>
 
+<<<<<<< HEAD
                     {/* Profile Menu */}
                     <ProfileMenu />
+=======
+                    {/* Profile Menu - hidden on admin screens */}
+                    {showProfileMenu && <ProfileMenu />}
+>>>>>>> two
                 </div>
             </header>
             )}

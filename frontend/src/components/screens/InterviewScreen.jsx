@@ -6,8 +6,15 @@ import { createSpeechRecognizer } from '../../utils/azureSpeech';
 // Toggle test mode: set to true for testing with text input, false for production (mic only)
 const FOR_TEST = false;
 
+// STT Provider: 'azure' for Azure Speech API, 'webspeech' for Web Speech API
+const STT_PROVIDER = 'azure'; // Options: 'azure' | 'webspeech'
+
 const InterviewScreen = () => {
+<<<<<<< HEAD
     const { interview, updateInterview, navigateTo, theme, toggleTheme, registerStopRecordingCallback } = useInterview();
+=======
+    const { interview, updateInterview, navigateTo, theme, toggleTheme, registerStopRecordingCallback, currentParams, user } = useInterview();
+>>>>>>> two
     const [panelState, setPanelState] = useState('loading'); // 'loading', 'speaking', 'listening', 'evaluating', 'skipping', 'coach-feedback'
     const [transcript, setTranscript] = useState('');
     const [endingSession, setEndingSession] = useState(false);
@@ -16,6 +23,21 @@ const InterviewScreen = () => {
     const [hintError, setHintError] = useState(null);
     const [isLoadingResults, setIsLoadingResults] = useState(false);
     const [questionWiseFeedback, setQuestionWiseFeedback] = useState([]);
+
+    const mergeFeedback = (prev, entry) => {
+        if (!entry) return prev;
+        const exists = prev.some(item => item.questionNumber === entry.questionNumber);
+        return exists ? prev : [...prev, entry];
+    };
+
+    const syncQuestionWiseFeedback = (entry) => {
+        const merged = mergeFeedback(questionWiseFeedback, entry);
+        if (merged !== questionWiseFeedback) {
+            setQuestionWiseFeedback(merged);
+            updateInterview({ questionWiseFeedback: merged });
+        }
+        return merged;
+    };
     const [isRecordingLocal, setIsRecordingLocal] = useState(false); // Local tracking for recognition state
     const [isSubmitting, setIsSubmitting] = useState(false); // Prevent double-click on submit/skip/proceed
     const recognitionRef = useRef(null);
@@ -25,10 +47,48 @@ const InterviewScreen = () => {
     const audioPlayedRef = useRef(false);
     const panelStateRef = useRef(panelState);
     const allowRecordingRef = useRef(false);
+<<<<<<< HEAD
+=======
+
+    const [isSpeakingQuestion, setIsSpeakingQuestion] = useState(false);
+    // Auto-start interview if role and level are provided via params
+    useEffect(() => {
+        if (currentParams?.role && currentParams?.level && !interview.sessionId) {
+            console.log('Auto-starting interview with role:', currentParams.role, 'level:', currentParams.level);
+            const startAutoInterview = async () => {
+                try {
+                    const roleDescription = currentParams.jobDescription || '';
+                    const persona = currentParams.persona || 'strict';
+                    const result = await api.startInterview(currentParams.role, currentParams.level, roleDescription, persona);
+                    if (result) {
+                        console.log('Interview started:', result);
+                        updateInterview({
+                            sessionId: result.session_id,
+                            userId: result.user_id || user?.id || null,
+                            userEmail: result.user_email || user?.email || null,
+                            userName: result.user_name || user?.name || null,
+                            role: currentParams.role,
+                            experience: currentParams.level,
+                            roleDescription,
+                            persona,
+                            questionNumber: 1,
+                            totalQuestions: result.total_questions || 5
+                        });
+                    }
+                } catch (error) {
+                    console.error('Failed to auto-start interview:', error);
+                    setPanelState('error');
+                }
+            };
+            startAutoInterview();
+        }
+    }, [currentParams?.role, currentParams?.level]);
+>>>>>>> two
 
     // Speak question text when component mounts or when new question arrives
     useEffect(() => {
         if (interview.questionText && !interview.audioPlaying && !audioPlayedRef.current) {
+<<<<<<< HEAD
             console.log('Starting to speak question:', interview.questionNumber);
             audioPlayedRef.current = true;
             updateInterview({ audioPlaying: true });
@@ -37,15 +97,30 @@ const InterviewScreen = () => {
             speakText(interview.questionText)
                 .then(() => {
                     console.log('Question speech finished - now transitioning to listening');
+=======
+            audioPlayedRef.current = true;
+            updateInterview({ audioPlaying: true });
+            setPanelState('speaking');
+            allowRecordingRef.current = false; // Disable recording while speaking
+
+            speakText(interview.questionText)
+                .then(() => {
+>>>>>>> two
                     updateInterview({ audioPlaying: false, questionText: null });
+                    allowRecordingRef.current = true;
+                    // Question finished -> transition to listening (recording starts via panelState effect)
                     setPanelState('listening');
+<<<<<<< HEAD
                     // Delay listening start by 1 second after question finishes
                     setTimeout(() => startRecording(), 1000);
+=======
+>>>>>>> two
                 })
-                .catch((error) => {
-                    console.warn('Failed to speak question:', error);
+                .catch(() => {
                     updateInterview({ audioPlaying: false });
+                    allowRecordingRef.current = true;
                     setPanelState('listening');
+<<<<<<< HEAD
                     // Delay listening start by 1 second even on error
                     setTimeout(() => startRecording(), 1000);
                 });
@@ -55,6 +130,9 @@ const InterviewScreen = () => {
             audioPlayedRef.current = true;
             setPanelState('listening');
             setTimeout(() => startRecording(), 1000);
+=======
+                });
+>>>>>>> two
         }
     }, [interview.questionText]);
 
@@ -79,9 +157,17 @@ const InterviewScreen = () => {
         panelStateRef.current = panelState;
     }, [panelState]);
 
+<<<<<<< HEAD
     // Stop recording any time we leave listening state
     useEffect(() => {
         if (panelState !== 'listening') {
+=======
+    // Start/stop recording strictly based on listening state
+    useEffect(() => {
+        if (panelState === 'listening') {
+            startRecording();
+        } else {
+>>>>>>> two
             stopAllRecording();
         }
     }, [panelState]);
@@ -96,6 +182,34 @@ const InterviewScreen = () => {
         return () => {
             console.log('InterviewScreen unmounting, stopping recording');
             stopAllRecording();
+<<<<<<< HEAD
+=======
+        };
+    }, []);
+
+    // Stop recording when window loses focus or becomes hidden
+    useEffect(() => {
+        const handleVisibilityChange = () => {
+            if (document.hidden) {
+                console.log('Window hidden, stopping recording');
+                stopAllRecording();
+                allowRecordingRef.current = false;
+            }
+>>>>>>> two
+        };
+
+        const handleBlur = () => {
+            console.log('Window lost focus, stopping recording');
+            stopAllRecording();
+            allowRecordingRef.current = false;
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        window.addEventListener('blur', handleBlur);
+
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+            window.removeEventListener('blur', handleBlur);
         };
     }, []);
 
@@ -106,6 +220,14 @@ const InterviewScreen = () => {
 
     const startRecording = () => {
         console.log('startRecording called, isRecordingLocal:', isRecordingLocal, 'panelState:', panelState, 'recognitionRef:', recognitionRef.current);
+<<<<<<< HEAD
+=======
+
+        if (panelStateRef.current !== 'listening') {
+            console.log('Not in listening state, skipping startRecording');
+            return;
+        }
+>>>>>>> two
         
         // Prevent starting if already recording and recognition ref exists
         if (isRecordingLocal && recognitionRef.current) {
@@ -115,7 +237,13 @@ const InterviewScreen = () => {
         
         try {
             allowRecordingRef.current = true;
+<<<<<<< HEAD
             const recognition = createSpeechRecognizer();
+=======
+            // Use STT_PROVIDER to determine which speech recognition to use
+            const forceWebSpeech = STT_PROVIDER === 'webspeech';
+            const recognition = createSpeechRecognizer(forceWebSpeech);
+>>>>>>> two
             
             finalTranscriptRef.current = '';
             transcriptRef.current = '';
@@ -126,7 +254,9 @@ const InterviewScreen = () => {
                 console.log('Speech recognition started');
                 setIsRecordingLocal(true);
                 updateInterview({ isRecording: true });
-                setPanelState('listening');
+                // Don't set panelState here - it should already be 'speaking' from the effect
+                // It will transition to 'listening' when we manually set it
+                // This prevents premature 'listening' state from showing
             };
 
             recognition.onresult = (event) => {
@@ -153,8 +283,11 @@ const InterviewScreen = () => {
                 console.error('Speech recognition error:', event.error);
                 if (event.error === 'not-allowed' || event.error.includes('not-allowed')) {
                     alert('Microphone access denied. Please allow microphone access and refresh the page.');
+                } else if (event.error === 'network' || event.error.includes('network')) {
+                    alert('Network error. Please check your internet connection and try again.');
                 } else {
-                    alert('Speech recognition error: ' + event.error);
+                    console.warn('Speech recognition error:', event.error);
+                    // Don't show alert for other errors, just log them
                 }
                 updateInterview({ isRecording: false });
                 // Don't change panel state - stay where we were
@@ -165,26 +298,36 @@ const InterviewScreen = () => {
                 console.log('Speech recognition ended, userStopped:', userStoppedRef.current);
                 console.log('Final transcript ref:', finalTranscriptRef.current);
                 console.log('Transcript ref:', transcriptRef.current);
+                console.log('Panel state:', panelStateRef.current);
                 
                 setIsRecordingLocal(false);
 
+<<<<<<< HEAD
                 if (!allowRecordingRef.current) {
                     updateInterview({ isRecording: false });
+=======
+                if (!allowRecordingRef.current || panelStateRef.current !== 'listening') {
+                    console.log('Not restarting - allowRecording:', allowRecordingRef.current, 'panelState:', panelStateRef.current);
+                    updateInterview({ isRecording: false });
+                    recognitionRef.current = null;
+>>>>>>> two
                     return;
                 }
                 
-                // Only submit if user manually stopped
+                // Only submit if user manually stopped (legacy path)
                 if (userStoppedRef.current) {
+                    allowRecordingRef.current = false;
                     updateInterview({ isRecording: false });
                     const answerToSend = finalTranscriptRef.current.trim() || transcriptRef.current.trim();
                     console.log('Submitting answer:', answerToSend);
-                    
+
                     // Reset the flag after submission
                     userStoppedRef.current = false;
                     // Clear the ref so we know to reinitialize
                     recognitionRef.current = null;
                     submitAnswer(answerToSend);
                 } else {
+<<<<<<< HEAD
                     // Recognition ended unexpectedly (silence, etc), restart it
                     console.log('Recognition ended unexpectedly, restarting...');
                     if (panelStateRef.current === 'listening') {
@@ -196,6 +339,14 @@ const InterviewScreen = () => {
                             updateInterview({ isRecording: false });
                         }
                     }
+=======
+                    // Recognition ended unexpectedly (silence, etc)
+                    // Do NOT automatically restart - let the user restart manually
+                    console.log('Recognition ended unexpectedly, NOT auto-restarting');
+                    updateInterview({ isRecording: false });
+                    recognitionRef.current = null;
+                    allowRecordingRef.current = false;
+>>>>>>> two
                 }
             };
 
@@ -214,7 +365,9 @@ const InterviewScreen = () => {
         console.log('User clicked Done Speaking, about to submit');
         console.log('Current panelState:', panelState);
         console.log('Recognition ref:', recognitionRef.current);
-        userStoppedRef.current = true;
+        allowRecordingRef.current = false;
+        userStoppedRef.current = false; // prevent onend auto-submit
+        // Stop recognition immediately
         if (recognitionRef.current) {
             console.log('Stopping recognition...');
             try {
@@ -225,6 +378,12 @@ const InterviewScreen = () => {
         } else {
             console.warn('Recognition ref not available!');
         }
+        // Clear recognition ref so it won't restart
+        recognitionRef.current = null;
+        // Submit answer directly
+        const answerToSend = finalTranscriptRef.current.trim() || transcriptRef.current.trim();
+        console.log('Submitting answer (direct):', answerToSend);
+        submitAnswer(answerToSend);
     };
 
     const handleGetHint = async () => {
@@ -294,34 +453,32 @@ const InterviewScreen = () => {
                 answer: answerText
             }];
 
+            // Build feedback entry if evaluation exists (works for all personas)
+            const feedbackEntry = result.evaluation ? {
+                questionNumber: interview.questionNumber,
+                question: interview.currentQuestion,
+                answer: answerText,
+                score: result.evaluation.score,
+                topic: result.evaluation.topic,
+                strengths: result.evaluation.strengths || [],
+                weaknesses: result.evaluation.weaknesses || [],
+                feedback: result.feedback || ''
+            } : null;
+
+            if (feedbackEntry) {
+                console.log('Captured evaluation data:', feedbackEntry);
+                syncQuestionWiseFeedback(feedbackEntry);
+            }
+
             if (!result.final && result.step === 'feedback') {
                 // Coach persona: show feedback screen and wait for proceed
                 console.log('Coach feedback step');
-                console.log('Result:', result);
+                console.log('Result:', JSON.stringify(result, null, 2));
                 console.log('Result.evaluation:', result.evaluation);
                 audioPlayedRef.current = false;
                 setHint(null); // Clear hint for next question
                 
-                // Capture evaluation data for question-wise feedback
-                if (result.evaluation) {
-                    console.log('Capturing evaluation data:', result.evaluation);
-                    const feedbackEntry = {
-                        questionNumber: interview.questionNumber,
-                        question: interview.currentQuestion,
-                        answer: answerText,
-                        score: result.evaluation.score,
-                        topic: result.evaluation.topic,
-                        strengths: result.evaluation.strengths || [],
-                        weaknesses: result.evaluation.weaknesses || [],
-                        feedback: result.feedback || ''
-                    };
-                    console.log('Feedback entry:', feedbackEntry);
-                    setQuestionWiseFeedback(prev => {
-                        const updated = [...prev, feedbackEntry];
-                        console.log('Updated questionWiseFeedback:', updated);
-                        return updated;
-                    });
-                } else {
+                if (!result.evaluation) {
                     console.warn('No evaluation data in result');
                 }
                 
@@ -346,38 +503,16 @@ const InterviewScreen = () => {
             } else if (!result.final && result.question) {
                 // Next question
                 console.log('Getting next question...');
-                console.log('Result:', result);
+                console.log('Result:', JSON.stringify(result, null, 2));
                 console.log('Result.evaluation:', result.evaluation);
                 audioPlayedRef.current = false; // Reset for next question
                 setHint(null); // Clear hint for next question
-                
-                // Capture evaluation data for question-wise feedback (from strict persona or after coach proceed)
-                if (result.evaluation) {
-                    console.log('Capturing evaluation data (strict/next):', result.evaluation);
-                    const feedbackEntry = {
-                        questionNumber: interview.questionNumber,
-                        question: interview.currentQuestion,
-                        answer: answerText,
-                        score: result.evaluation.score,
-                        topic: result.evaluation.topic,
-                        strengths: result.evaluation.strengths || [],
-                        weaknesses: result.evaluation.weaknesses || [],
-                        feedback: result.feedback || 'No additional feedback provided'
-                    };
-                    console.log('Feedback entry (strict):', feedbackEntry);
-                    setQuestionWiseFeedback(prev => {
-                        const updated = [...prev, feedbackEntry];
-                        console.log('Updated questionWiseFeedback:', updated);
-                        return updated;
-                    });
-                } else {
-                    console.warn('No evaluation data in result (strict/next)');
-                }
                 
                 // Reset transcripts and refs for new question
                 finalTranscriptRef.current = '';
                 transcriptRef.current = '';
                 userStoppedRef.current = false;
+                allowRecordingRef.current = false; // Disable recording until speech finishes
                 setTranscript('');
                 // Clear recognition so it will be reinitialized when listening starts
                 if (recognitionRef.current) {
@@ -395,27 +530,18 @@ const InterviewScreen = () => {
                     audioPlaying: false,
                     answers: updatedAnswers,
                 });
-                setPanelState('speaking');
+                // Don't set panelState here - let the effect handle the flow
             } else {
                 // Interview complete
                 console.log('Interview complete');
-                console.log('Result:', result);
+                console.log('Result:', JSON.stringify(result, null, 2));
+                console.log('Local questionWiseFeedback state:', questionWiseFeedback);
                 
                 // Capture evaluation for the LAST question if it exists
-                let finalFeedback = [...questionWiseFeedback];
-                if (result.evaluation) {
-                    console.log('Capturing final question evaluation:', result.evaluation);
-                    const lastFeedbackEntry = {
-                        questionNumber: interview.questionNumber,
-                        question: interview.currentQuestion,
-                        answer: answerText,
-                        score: result.evaluation.score,
-                        topic: result.evaluation.topic,
-                        strengths: result.evaluation.strengths || [],
-                        weaknesses: result.evaluation.weaknesses || [],
-                        feedback: result.feedback || ''
-                    };
-                    finalFeedback = [...questionWiseFeedback, lastFeedbackEntry];
+                const finalFeedback = feedbackEntry
+                    ? mergeFeedback(questionWiseFeedback, feedbackEntry)
+                    : [...questionWiseFeedback];
+                if (feedbackEntry) {
                     console.log('Final feedback with last question:', finalFeedback);
                 }
                 
@@ -445,9 +571,14 @@ const InterviewScreen = () => {
         
         setIsSubmitting(true);
         try {
+            // Stop any active recording immediately
+            stopAllRecording();
+            
             const result = await api.continue(interview.sessionId);
             console.log('Proceeded after feedback, response:', result);
+            // Reset refs BEFORE updating state to ensure effect triggers correctly
             audioPlayedRef.current = false;
+            userStoppedRef.current = false;
             setHint(null); // Clear hint for next question
             updateInterview({
                 feedbackText: null,
@@ -456,7 +587,7 @@ const InterviewScreen = () => {
                 questionNumber: interview.questionNumber + 1,
                 audioPlaying: false,
             });
-            setPanelState('speaking');
+            // Don't set panelState here - let the effect handle the speaking->listening flow
         } catch (error) {
             console.error('Error proceeding after feedback:', error);
             alert('Failed to proceed to next question.');
@@ -495,7 +626,9 @@ const InterviewScreen = () => {
         }
     };
 
-    const progressPercentage = (interview.questionNumber / interview.totalQuestions) * 100;
+    const progressPercentage = interview.totalQuestions > 0 
+        ? (interview.questionNumber / interview.totalQuestions) * 100 
+        : 0;
 
     const skipQuestion = async () => {
         if (isSubmitting) {
@@ -522,6 +655,7 @@ const InterviewScreen = () => {
 
     const endSession = () => {
         console.log('Ending session early');
+        console.log('Current questionWiseFeedback:', questionWiseFeedback);
         setEndingSession(true);
         if (recognitionRef.current) {
             recognitionRef.current.stop();
@@ -532,7 +666,8 @@ const InterviewScreen = () => {
                 console.log('Session ended, response:', result);
                 if (result.final && result.summary) {
                     updateInterview({ 
-                        summary: result.summary
+                        summary: result.summary,
+                        questionWiseFeedback: questionWiseFeedback
                     });
                 }
                 navigateTo('results');
@@ -650,11 +785,17 @@ const InterviewScreen = () => {
                         <div className="flex flex-col gap-2 mb-4">
                             <div className="flex justify-between items-center">
                                 <span className="text-primary font-bold text-xs uppercase tracking-wider">
-                                    Q{interview.questionNumber}/{interview.totalQuestions}
+                                    Q{interview.questionNumber || 0}/{interview.totalQuestions || 5}
                                 </span>
                                 <span className="text-gray-400 dark:text-gray-500 text-xs font-semibold">
                                     {interview.roleDisplay || 'Technical'}
                                 </span>
+<<<<<<< HEAD
+                                <span className="text-gray-400 dark:text-gray-500 text-xs font-semibold">
+                                    {interview.roleDisplay || 'Technical'}
+                                </span>
+=======
+>>>>>>> two
                             </div>
                             <div className="h-1 w-full bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
                                 <div className="h-full bg-primary rounded-full transition-all duration-500" style={{width: `${progressPercentage}%`}}></div>
@@ -666,7 +807,11 @@ const InterviewScreen = () => {
                             <h1 className="text-lg md:text-xl lg:text-2xl font-bold leading-snug tracking-tight text-gray-900 dark:text-gray-50 overflow-y-auto max-h-[300px] pr-2">
                                 {panelState === 'generating'
                                     ? (isLoadingResults ? 'Loading results...' : 'Generating next question...')
+<<<<<<< HEAD
                                     : interview.currentQuestion}
+=======
+                                    : (interview.currentQuestion || 'Loading question...')}
+>>>>>>> two
                             </h1>
                             <p className="mt-3 text-gray-500 dark:text-gray-400 text-sm md:text-base leading-relaxed">
                                 {transcript || (panelState === 'listening' ? 'Start speaking...' : '')}
@@ -674,30 +819,41 @@ const InterviewScreen = () => {
                         </div>
 
                         {/* Hint/Skip Controls */}
-                        <div className="mt-3 flex gap-3 pt-2">
+                        <div className="mt-3 flex gap-3 pt-2 justify-between items-center">
+                            <div className="flex gap-3">
+                                <button 
+                                    onClick={handleGetHint}
+                                    disabled={hintLoading || panelState === 'speaking' || isSubmitting}
+                                    className={`text-sm font-semibold flex items-center gap-2 transition-all ${
+                                        hintLoading || panelState === 'speaking' || isSubmitting
+                                            ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed opacity-50'
+                                            : 'text-gray-400 dark:text-gray-500 hover:text-primary cursor-pointer'
+                                    }`}
+                                >
+                                    <span className="material-symbols-outlined text-[18px]">lightbulb</span>
+                                    {hintLoading ? 'Getting hint...' : 'Get a hint'}
+                                </button>
+                                <button 
+                                    onClick={skipQuestion} 
+                                    disabled={panelState === 'speaking' || isSubmitting}
+                                    className={`text-sm font-semibold flex items-center gap-2 transition-all ${
+                                        panelState === 'speaking' || isSubmitting
+                                            ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed opacity-50' 
+                                            : 'text-gray-400 dark:text-gray-500 hover:text-primary cursor-pointer'
+                                    }`}
+                                >
+                                    <span className="material-symbols-outlined text-[18px]">skip_next</span>
+                                    Skip question
+                                </button>
+                            </div>
                             <button 
-                                onClick={handleGetHint}
-                                disabled={hintLoading || panelState === 'speaking' || isSubmitting}
-                                className={`text-sm font-semibold flex items-center gap-2 transition-all ${
-                                    hintLoading || panelState === 'speaking' || isSubmitting
-                                        ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed opacity-50'
-                                        : 'text-gray-400 dark:text-gray-500 hover:text-primary cursor-pointer'
-                                }`}
+                                onClick={endSession}
+                                disabled={endingSession}
+                                className="text-sm font-semibold flex items-center gap-2 px-3 py-1.5 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="End the interview session"
                             >
-                                <span className="material-symbols-outlined text-[18px]">lightbulb</span>
-                                {hintLoading ? 'Getting hint...' : 'Get a hint'}
-                            </button>
-                            <button 
-                                onClick={skipQuestion} 
-                                disabled={panelState === 'speaking' || isSubmitting}
-                                className={`text-sm font-semibold flex items-center gap-2 transition-all ${
-                                    panelState === 'speaking' || isSubmitting
-                                        ? 'text-gray-300 dark:text-gray-600 cursor-not-allowed opacity-50' 
-                                        : 'text-gray-400 dark:text-gray-500 hover:text-primary cursor-pointer'
-                                }`}
-                            >
-                                <span className="material-symbols-outlined text-[18px]">skip_next</span>
-                                Skip question
+                                <span className="material-symbols-outlined text-[18px]">exit_to_app</span>
+                                {endingSession ? 'Ending...' : 'End session'}
                             </button>
                         </div>
 
@@ -713,6 +869,9 @@ const InterviewScreen = () => {
 
                     {/* Right Panel: Status Panel */}
                     <div className="w-full md:w-[280px] bg-gray-50 dark:bg-[#1a1d21] p-4 md:p-6 flex flex-col items-center justify-center text-center relative overflow-y-auto">
+                        {panelState === 'loading' && (
+                            <LoadingPanel />
+                        )}
                         {panelState === 'speaking' && (
                             <SpeakingPanel />
                         )}
@@ -734,6 +893,23 @@ const InterviewScreen = () => {
         </div>
     );
 };
+
+// Loading Panel Component
+const LoadingPanel = () => (
+    <>
+        <div className="flex-1 flex flex-col items-center justify-center w-full">
+            <div className="relative w-24 h-24 mb-6">
+                <div className="absolute inset-0 rounded-full border-4 border-primary/20"></div>
+                <div className="absolute inset-0 rounded-full border-4 border-t-primary border-r-transparent border-b-transparent border-l-transparent animate-spin"></div>
+                <div className="absolute inset-0 flex items-center justify-center">
+                    <span className="material-symbols-outlined text-3xl text-primary">hourglass_empty</span>
+                </div>
+            </div>
+            <h3 className="text-lg font-bold text-gray-900 dark:text-gray-50 mb-2">Getting Ready...</h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400">Loading your interview</p>
+        </div>
+    </>
+);
 
 // Speaking Panel Component
 const SpeakingPanel = () => (

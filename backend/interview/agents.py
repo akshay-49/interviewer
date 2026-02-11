@@ -1,8 +1,8 @@
-from typing import Optional
+from typing import Optional, List
 from langchain_core.messages import SystemMessage, HumanMessage
-from backend.models import InterviewState, Evaluation
-from backend.llm import question_llm, evaluation_with_feedback_llm, hint_llm, closing_llm, transition_llm
-from backend.config import (
+from backend.interview.models import InterviewState, Evaluation
+from backend.core.llm import question_llm, evaluation_with_feedback_llm, hint_llm, closing_llm, transition_llm
+from backend.core.config import (
     MAX_QUESTIONS,
     WEAK_ANSWER_THRESHOLD,
     STRONG_ANSWER_THRESHOLD,
@@ -14,8 +14,43 @@ from backend.config import (
     DIFFICULTY_HARD
 )
 import logging
+import re
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_question_topics(questions: List[str]) -> str:
+    """
+    Extract key topics/keywords from a list of questions.
+    Focuses on nouns and important technical terms.
+    """
+    if not questions:
+        return "None"
+    
+    # Common stop words to ignore
+    stop_words = {
+        'a', 'an', 'the', 'you', 'your', 'would', 'how', 'what', 'why', 'when', 'where',
+        'is', 'are', 'do', 'does', 'can', 'could', 'should', 'have', 'has', 'be',
+        'about', 'in', 'on', 'at', 'to', 'for', 'from', 'of', 'and', 'or', 'but',
+        'tell', 'explain', 'describe', 'discuss', 'difference', 'between', 'vs',
+        'project', 'experience', 'work', 'worked', 'working', 'i', 'me', 'we'
+    }
+    
+    topics = set()
+    for question in questions:
+        # Extract words, convert to lowercase
+        words = re.findall(r'\b[a-z]+\b', question.lower())
+        # Filter out stop words and add substantial words
+        for word in words:
+            if len(word) > 3 and word not in stop_words:
+                topics.add(word)
+    
+    if not topics:
+        return "None"
+    
+    # Return top keywords (limit to 15)
+    sorted_topics = sorted(list(topics))[:15]
+    return ", ".join(sorted_topics)
 
 
 def ask_question_agent(state: InterviewState):
@@ -25,9 +60,13 @@ def ask_question_agent(state: InterviewState):
     Use role, experience, difficulty, weak topics,
     and previously asked questions to produce
     exactly one professional interview question.
+    
+    ENFORCES TOPIC VARIETY by extracting keywords from previous questions
+    and telling the LLM to explicitly avoid those topics.
     """
     weak_topics = ", ".join(state["weak_topics"]) if state["weak_topics"] else "None"
     prev_qs = "\n".join(f"- {q}" for q in state["asked_questions"]) or "None"
+    asked_topics = _extract_question_topics(state["asked_questions"])
     role_desc = state.get("role_description") or ""
     question_count = state.get("question_count", 0)
 
@@ -39,32 +78,33 @@ def ask_question_agent(state: InterviewState):
                 "You are an experienced technical interviewer.\n"
                 "Ask questions relevant to the role, experience level, and the provided role description.\n"
                 "Sound natural, not scripted. Focus on real-world competency.\n\n"
-                "Question Types (Vary question types across the interview):\n"
-                "1. BEHAVIORAL: Ask about past experiences, decisions, conflicts, or lessons learned (e.g., 'Tell me about a time when...')\n"
-                "2. TECHNICAL CONCEPT: Ask about fundamental concepts, principles, or theory (e.g., 'What is...', 'Explain...')\n"
-                "3. PROBLEM-SOLVING: Ask how to approach a challenge, design system, or solve a problem (e.g., 'How would you...')\n"
-                "4. SCENARIO-BASED: Present a real-world situation and ask how they'd handle it (e.g., 'If you were...')\n"
-                "5. DEEP-DIVE: Dig deeper into previously mentioned topics (e.g., 'Why did you choose...', 'What were the trade-offs...')\n"
-                "6. BEST PRACTICES: Ask about standards, conventions, or methodologies (e.g., 'What are best practices for...')\n"
-                "7. EXPERIENCE-FOCUSED: Ask about their hands-on experience and projects (e.g., 'What's the most complex...', 'Describe a project where...')\n\n"
+                "Question Types (PRIORITIZE TECHNICAL - Balance is ~40% Technical, ~30% Problem-Solving, ~20% Behavioral, ~10% Scenario):\n"
+                "1. TECHNICAL CONCEPT: Ask about fundamental concepts, principles, or theory (MOST IMPORTANT)\n"
+                "   Examples: 'What is X?', 'Explain how X works', 'What are the differences between X and Y?', 'Define X in simple terms'\n"
+                "2. PROBLEM-SOLVING: Ask how to approach a challenge, design system, or solve a problem\n"
+                "   Examples: 'How would you design...?', 'How would you optimize...?', 'What approach would you take...?'\n"
+                "3. BEHAVIORAL: Ask about general past experiences, lessons learned (Keep it BROAD and accessible)\n"
+                "   Examples: 'Tell me about a project you worked on', 'How do you typically approach problem-solving?', 'Describe your experience with X'\n"
+                "4. SCENARIO-BASED: Present a realistic situation and ask how they'd handle it\n"
+                "   Examples: 'If you had to...', 'Imagine you were working on...', 'In a situation where...'\n"
+                "5. BEST PRACTICES: Ask about standards, conventions, or methodologies\n"
+                "   Examples: 'What are best practices for...?', 'How do teams typically handle...?'\n\n"
                 "Rules:\n"
                 "- Ask only ONE thing.\n"
                 "- Use at most ONE interrogative word (what OR why OR how OR tell OR explain OR describe).\n"
                 "- Do NOT combine multiple sub-questions.\n"
                 "- Do NOT use conjunctions like 'and', 'also', 'as well as', 'furthermore'.\n"
                 "- Do NOT ask for definitions and examples in the same question.\n"
-                "- Do NOT ask follow-up parts in the same turn.\n"
                 "- Make questions conversational and engaging, not robotic.\n"
                 "- Avoid overly technical jargon unless appropriate for the role.\n"
                 "- Vary sentence structure and question styles.\n\n"
                 "Adaptation:\n"
                 "- Use 'Role Description' to tailor domain, stack, and context.\n"
-                "- If difficulty is 'easy': Focus on fundamentals and foundational concepts.\n"
+                "- If difficulty is 'easy': Focus on fundamentals and foundational concepts (ask TECHNICAL questions).\n"
                 "- If difficulty is 'hard': Push on edge cases, optimization, system design, trade-offs, and advanced concepts.\n"
-                "- Avoid topics in 'Weak Topics' or address them from a different angle to help improvement.\n"
-                "- Build on previously asked questions without repetition - ask about different topics.\n"
-                "- Vary question types throughout the interview - don't ask similar types consecutively.\n"
-                "- Mix behavioral, technical, and scenario-based questions.\n\n"
+                "- AVOID asking too many BEHAVIORAL/SOFT questions - focus on TECHNICAL skills assessment.\n"
+                "- Build on previously asked questions WITHOUT REPETITION - ask about different topics/concepts.\n"
+                "- Vary question types throughout the interview - don't ask similar types consecutively.\n\n"
                 'Return JSON only using the schema: {"question": "string"}'
             )
         ),
@@ -79,11 +119,19 @@ Weak Topics: {weak_topics}
 Role Description:
 {role_desc}
 
-Previously asked questions (AVOID REPEATING THESE TOPICS):
+Previously asked questions:
 {prev_qs}
 
-Important: Generate a DIFFERENT question that covers a new topic or angle from the ones already asked. 
-Vary the question type for better interview quality.
+Topics already covered (DO NOT ASK ABOUT THESE):
+{asked_topics}
+
+CRITICAL INSTRUCTIONS:
+1. AVOID these specific keywords/topics: {asked_topics}
+2. Focus on COMPLETELY DIFFERENT concepts than what's already been asked
+3. Question #{question_count + 1}: Prioritize asking a TECHNICAL QUESTION (concepts, theory, fundamentals)
+4. Do NOT ask about the same topic with different wording
+5. Do NOT ask overly soft/behavioral questions - assess TECHNICAL competency
+6. Ensure deep topic diversity across all 5 questions
 """
         )
     ])
