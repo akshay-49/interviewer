@@ -1,8 +1,9 @@
 """Authentication API endpoints with Auth0 integration"""
 from fastapi import APIRouter, HTTPException, status, Depends, Response, Request
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import Optional
-from backend.auth.auth0_utils import get_current_user, get_current_user_from_cookie, extract_user_info, verify_entra_id_token
+from backend.auth.auth0_utils import get_current_user_from_cookie, extract_user_info, verify_entra_id_token
 from backend.core.cosmos import users_container, serialize_for_cosmos
 from datetime import datetime, timedelta
 from collections import defaultdict
@@ -12,19 +13,18 @@ import requests
 import os
 import time
 import secrets
-import jwt
-import bcrypt
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
-# Load JWT secret for local auth - MUST be set in production
-JWT_SECRET = os.getenv("JWT_SECRET_KEY")
-if not JWT_SECRET:
-    raise ValueError("JWT_SECRET_KEY must be set in environment variables")
-
 # Environment check for secure cookies
 IS_PRODUCTION = os.getenv("ENVIRONMENT", "development") == "production"
+
+AUTH0_DOMAIN = os.getenv("AUTH0_DOMAIN", "")
+AUTH0_CLIENT_ID = os.getenv("AUTH0_CLIENT_ID", "")
+AUTH0_CLIENT_SECRET = os.getenv("AUTH0_CLIENT_SECRET", "")
+AUTH0_CALLBACK_URL = os.getenv("AUTH0_CALLBACK_URL", "http://localhost:8000/auth/callback")
+AUTH0_DEFAULT_RETURN_TO = os.getenv("AUTH0_DEFAULT_RETURN_TO", "http://localhost:5173/callback")
 
 # Rate limiting
 rate_limit_storage = defaultdict(list)
@@ -58,31 +58,6 @@ def _cache_user(user_data: dict) -> None:
     if user_sub:
         in_memory_users[user_sub] = user_data
 
-def _find_user_in_memory(email: str) -> Optional[dict]:
-    """Find user in memory by email."""
-    for user in in_memory_users.values():
-        if user.get("email") == email:
-            return user
-    return None
-
-def _find_user_in_cosmos(email: str) -> Optional[dict]:
-    """Find user in Cosmos DB by email and cache result."""
-    try:
-        query = "SELECT * FROM users u WHERE u.email = @email"
-        items = list(users_container.query_items(
-            query=query,
-            parameters=[{"name": "@email", "value": email}],
-            enable_cross_partition_query=True,
-            max_item_count=1
-        ))
-        user = items[0] if items else None
-        if user:
-            _cache_user(user)
-        return user
-    except Exception as e:
-        logger.error(f"Error querying user by email from Cosmos DB: {e}")
-        return None
-
 # Pydantic models for request/response
 class UserInfo(BaseModel):
     sub: str
@@ -102,23 +77,10 @@ class UserResponse(BaseModel):
 class AuthResponse(BaseModel):
     user: UserResponse
 
-class LoginRequest(BaseModel):
-    email: str
-    password: str
-
 class LoginResponse(BaseModel):
     user: UserResponse
     access_token: str
     token_type: str = "Bearer"
-
-class RegisterRequest(BaseModel):
-    email: str
-    password: str
-    name: str = ""
-
-class RegisterResponse(BaseModel):
-    user: UserResponse
-    message: str = "User registered successfully"
 
 class AcceptInviteRequest(BaseModel):
     invite_code: str
@@ -126,103 +88,148 @@ class AcceptInviteRequest(BaseModel):
 class SyncUserResponse(BaseModel):
     user: UserResponse
 
-@router.post("/register", response_model=RegisterResponse)
-def register(request: RegisterRequest, req: Request, response: Response):
-    """
-    Register a new user without Auth0 - uses in-memory storage only
-    """
-    # Rate limiting
-    client_ip = req.client.host
-    if not check_rate_limit(client_ip, "register"):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many registration attempts. Please try again later."
-        )
-    
-    try:
-        # Check if user already exists in memory or Cosmos DB
-        existing_user = _find_user_in_memory(request.email) or _find_user_in_cosmos(request.email)
-        
-        if existing_user:
-            logger.warning(f"User already exists: {request.email}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="User with this email already exists"
-            )
-        
-        # Create user in memory
-        user_id = str(uuid.uuid4())
-        user_sub = f"local|{user_id}"
-        
-        # Hash password securely with bcrypt
-        password_hash = bcrypt.hashpw(request.password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-        
-        user_data = {
-            "id": user_id,
-            "auth0_sub": user_sub,
-            "email": request.email,
-            "full_name": request.name or request.email,
-            "picture": None,
-            "password_hash": password_hash,
-            "is_admin": False,
-            "is_active": True,
-            "provider": "local",
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow()
-        }
-        
-        # Persist to Cosmos DB and cache in memory
-        cosmos_user = {
-            **user_data,
-            "user_id": user_id,
-            "id": user_id
-        }
-        users_container.upsert_item(serialize_for_cosmos(cosmos_user))
-        _cache_user(user_data)
-        logger.info(f"✅ Created local user: {user_id} ({request.email})")
-        
-        # Generate access token
-        token_payload = {
-            "sub": user_sub,
-            "email": request.email,
-            "exp": datetime.utcnow() + timedelta(hours=24)
-        }
-        access_token = jwt.encode(token_payload, JWT_SECRET, algorithm="HS256")
-        
-        # Set httpOnly cookie
-        response.set_cookie(
-            key="access_token",
-            value=access_token,
-            path="/",
-            httponly=True,
-            secure=IS_PRODUCTION,
-            samesite="lax",
-            max_age=86400
-        )
-        
-        return RegisterResponse(
-            user=UserResponse(
-                id=user_data["id"],
-                email=user_data["email"],
-                full_name=user_data["full_name"],
-                picture=user_data.get("picture"),
-                is_admin=user_data["is_admin"],
-                is_active=user_data["is_active"]
-            ),
-            message="User registered successfully"
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Registration error: {e}", exc_info=True)
+
+def _require_auth0_config():
+    if not AUTH0_DOMAIN or not AUTH0_CLIENT_ID or not AUTH0_CLIENT_SECRET:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Registration failed. Please try again."
+            detail="Auth0 configuration is missing"
         )
 
+
+@router.get("/login")
+def login(request: Request):
+    """Start Auth0 login (Regular Web App)."""
+    _require_auth0_config()
+
+    screen_hint = request.query_params.get("screen_hint", "login")
+    login_hint = request.query_params.get("login_hint")
+    return_to = request.query_params.get("return_to", AUTH0_DEFAULT_RETURN_TO)
+
+    state = secrets.token_urlsafe(32)
+    nonce = secrets.token_urlsafe(32)
+
+    params = {
+        "response_type": "code",
+        "client_id": AUTH0_CLIENT_ID,
+        "redirect_uri": AUTH0_CALLBACK_URL,
+        "scope": "openid profile email",
+        "state": state,
+        "nonce": nonce,
+        "screen_hint": screen_hint,
+        "prompt": "login",
+    }
+
+    if login_hint:
+        params["login_hint"] = login_hint
+
+    query = "&".join(f"{k}={requests.utils.quote(str(v))}" for k, v in params.items())
+    authorize_url = f"https://{AUTH0_DOMAIN}/authorize?{query}"
+
+    response = RedirectResponse(authorize_url)
+    response.set_cookie(
+        key="auth_state",
+        value=state,
+        httponly=True,
+        secure=IS_PRODUCTION,
+        samesite="lax",
+        max_age=600
+    )
+    response.set_cookie(
+        key="auth_nonce",
+        value=nonce,
+        httponly=True,
+        secure=IS_PRODUCTION,
+        samesite="lax",
+        max_age=600
+    )
+    response.set_cookie(
+        key="auth_return_to",
+        value=return_to,
+        httponly=True,
+        secure=IS_PRODUCTION,
+        samesite="lax",
+        max_age=600
+    )
+
+    return response
+
+
+@router.get("/callback")
+def auth_callback(request: Request):
+    """Handle Auth0 callback, exchange code for tokens, and set session cookie."""
+    _require_auth0_config()
+
+    code = request.query_params.get("code")
+    state = request.query_params.get("state")
+    stored_state = request.cookies.get("auth_state")
+    return_to = request.cookies.get("auth_return_to") or AUTH0_DEFAULT_RETURN_TO
+
+    if not code or not state or not stored_state or state != stored_state:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid state")
+
+    token_url = f"https://{AUTH0_DOMAIN}/oauth/token"
+    token_payload = {
+        "grant_type": "authorization_code",
+        "client_id": AUTH0_CLIENT_ID,
+        "client_secret": AUTH0_CLIENT_SECRET,
+        "code": code,
+        "redirect_uri": AUTH0_CALLBACK_URL,
+    }
+
+    token_response = requests.post(token_url, json=token_payload, timeout=10)
+    if token_response.status_code >= 400:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Failed to exchange code")
+
+    token_data = token_response.json()
+    access_token = token_data.get("access_token")
+
+    if not access_token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing access token")
+
+    response = RedirectResponse(return_to)
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=IS_PRODUCTION,
+        path="/",
+        samesite="lax",
+        max_age=3600
+    )
+    response.delete_cookie("auth_state")
+    response.delete_cookie("auth_nonce")
+    response.delete_cookie("auth_return_to")
+
+    return response
+
+
+@router.get("/logout")
+def logout(request: Request):
+    """Logout and clear session cookie."""
+    return_to = request.query_params.get("return_to", "http://localhost:5173/login")
+    logout_url = f"https://{AUTH0_DOMAIN}/v2/logout?client_id={AUTH0_CLIENT_ID}&returnTo={requests.utils.quote(return_to)}"
+
+    response = RedirectResponse(logout_url)
+    response.delete_cookie("access_token", path="/")
+    return response
+
+
+@router.get("/me", response_model=UserResponse)
+def get_me(current_user: dict = Depends(get_current_user_from_cookie)):
+    """Return current user from session cookie."""
+    user_info = extract_user_info(current_user)
+    return {
+        "id": user_info.get("auth0_sub"),
+        "email": user_info.get("email"),
+        "full_name": user_info.get("full_name"),
+        "picture": user_info.get("picture"),
+        "is_admin": user_info.get("email", "").endswith("@accellor.com"),
+        "is_active": True
+    }
+
 @router.post("/accept-invite")
-def accept_invite(request: AcceptInviteRequest, auth0_user: dict = Depends(get_current_user)):
+def accept_invite(request: AcceptInviteRequest, auth0_user: dict = Depends(get_current_user_from_cookie)):
     """Mark an invite as used and persist the Auth0 user in Cosmos DB."""
     invite_code = request.invite_code
     if not invite_code:
@@ -346,7 +353,7 @@ def accept_invite(request: AcceptInviteRequest, auth0_user: dict = Depends(get_c
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to accept invite")
 
 @router.post("/sync-user", response_model=SyncUserResponse)
-def sync_user(auth0_user: dict = Depends(get_current_user)):
+def sync_user(auth0_user: dict = Depends(get_current_user_from_cookie)):
     """Sync Auth0 user profile into Cosmos DB for admin visibility."""
     user_info = extract_user_info(auth0_user)
     user_email = user_info.get("email", "").lower()
@@ -416,93 +423,6 @@ def sync_user(auth0_user: dict = Depends(get_current_user)):
     except Exception as e:
         logger.error(f"Error syncing user: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to sync user")
-
-@router.post("/login", response_model=LoginResponse)
-def login(request: LoginRequest, req: Request, response: Response):
-    """
-    Login with email and password using in-memory storage
-    Sets httpOnly cookie with access token and returns user info
-    """
-    # Rate limiting
-    client_ip = req.client.host
-    if not check_rate_limit(client_ip, "login"):
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many login attempts. Please try again later."
-        )
-    
-    try:
-        # Find user in memory or Cosmos DB
-        user_data = _find_user_in_memory(request.email)
-        if not user_data:
-            user_data = _find_user_in_cosmos(request.email)
-        
-        if not user_data:
-            logger.warning(f"Login failed - user not found: {request.email}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid email or password"
-            )
-        
-        # Check password using bcrypt
-        stored_hash = user_data.get("password_hash", "").encode('utf-8')
-        if not bcrypt.checkpw(request.password.encode('utf-8'), stored_hash):
-            logger.warning(f"Login failed - invalid password: {request.email}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid email or password"
-            )
-        
-        # Check if user is active
-        if not user_data.get("is_active", True):
-            logger.warning(f"Inactive user attempted to login: {request.email}")
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Your account has been deactivated. Please contact an administrator."
-            )
-        
-        logger.info(f"Login successful for {request.email}")
-        
-        # Generate access token
-        token_payload = {
-            "sub": user_data["auth0_sub"],
-            "email": user_data["email"],
-            "exp": datetime.utcnow() + timedelta(hours=24)
-        }
-        access_token = jwt.encode(token_payload, JWT_SECRET, algorithm="HS256")
-        
-        # Set httpOnly cookie
-        response.set_cookie(
-            key="access_token",
-            value=access_token,
-            path="/",
-            httponly=True,
-            secure=IS_PRODUCTION,
-            samesite="lax",
-            max_age=86400
-        )
-        
-        return LoginResponse(
-            user=UserResponse(
-                id=user_data["id"],
-                email=user_data["email"],
-                full_name=user_data["full_name"],
-                picture=user_data.get("picture"),
-                is_admin=user_data["is_admin"],
-                is_active=user_data["is_active"]
-            ),
-            access_token=access_token,
-            token_type="Bearer"
-        )
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Login error: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred during login"
-        )
 
 @router.post("/logout")
 def logout(response: Response, request: Request):
@@ -869,8 +789,8 @@ def microsoft_callback(user_info: UserInfo, response: Response):
         "token_type": "Bearer"
     }
 
-@router.get("/me", response_model=UserResponse)
-def get_current_user_info(auth0_user: dict = Depends(get_current_user)):
+@router.get("/me-info", response_model=UserResponse)
+def get_current_user_info(auth0_user: dict = Depends(get_current_user_from_cookie)):
     """
     Get current user information from Auth0 token
     """
@@ -901,37 +821,58 @@ def get_current_user_info(auth0_user: dict = Depends(get_current_user)):
     }
 
 @router.get("/admin/users")
-def list_users(auth0_user: dict = Depends(get_current_user)):
+def list_users(auth0_user: dict = Depends(get_current_user_from_cookie)):
     """List users for admin dashboard (requires authentication)"""
     user_info = extract_user_info(auth0_user)
-    
-    # Check if user is admin
-    user_data = in_memory_users.get(user_info["auth0_sub"])
-    if not user_data or not user_data.get("is_admin", False):
-        # Allow @accellor.com users
-        if not user_info["email"].endswith("@accellor.com"):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Admin access required"
-            )
-    
-    # Return all users from memory
-    users = list(in_memory_users.values())
-    
-    return {
-        "users": [
-            {
-                "id": u["id"],
-                "email": u["email"],
-                "full_name": u["full_name"],
-                "is_active": u.get("is_active", True),
-                "is_admin": u.get("is_admin", False),
-                "auth_provider": "auth0",
-                "created_at": u["created_at"].isoformat() if u.get("created_at") else None,
-            }
-            for u in users
-        ]
-    }
+
+    is_accellor = user_info.get("email", "").endswith("@accellor.com")
+    try:
+        from backend.core.cosmos import users_container
+
+        # Check admin status in Cosmos if not Accellor domain (skip in dev)
+        if IS_PRODUCTION and not is_accellor:
+            user_query = "SELECT * FROM users WHERE users.user_id = @id"
+            user_items = list(users_container.query_items(
+                query=user_query,
+                parameters=[{"name": "@id", "value": user_info.get("auth0_sub")}],
+                max_item_count=1,
+                enable_cross_partition_query=True
+            ))
+            if not user_items or not user_items[0].get("is_admin", False):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Admin access required"
+                )
+
+        # Return all users from Cosmos
+        query = "SELECT * FROM users"
+        items = list(users_container.query_items(
+            query=query,
+            enable_cross_partition_query=True
+        ))
+
+        users = []
+        for item in items:
+            created_at = item.get("created_at")
+            users.append({
+                "id": item.get("user_id"),
+                "email": item.get("user_email"),
+                "full_name": item.get("user_name"),
+                "is_active": item.get("is_active", True),
+                "is_admin": item.get("is_admin", item.get("user_email", "").endswith("@accellor.com")),
+                "auth_provider": item.get("auth_provider", "auth0"),
+                "created_at": created_at,
+                "job_title": item.get("job_title"),
+                "company_name": item.get("company_name"),
+                "experience_level": item.get("experience_level")
+            })
+
+        return {"users": users}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Admin user list error: {e}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to load users")
 
 @router.delete("/admin/users/{user_id}")
 def delete_user(user_id: str, auth0_user: dict = Depends(get_current_user_from_cookie)):

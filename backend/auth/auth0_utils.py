@@ -5,7 +5,7 @@ import base64
 from typing import Optional
 from fastapi import HTTPException, status, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from jose import jwt, JWTError
+from jose import JWTError
 import requests
 from dotenv import load_dotenv
 
@@ -15,14 +15,13 @@ load_dotenv()
 AUTH0_DOMAIN = os.getenv("AUTH0_DOMAIN")
 AUTH0_AUDIENCE = os.getenv("AUTH0_AUDIENCE")
 AUTH0_ALGORITHMS = ["RS256"]
-JWT_SECRET = os.getenv("JWT_SECRET_KEY")
 
 # Entra ID (Azure AD) configuration
 AZURE_TENANT_ID = os.getenv("VITE_AZURE_AUTHORITY", "").split("/")[-1] or "f8300747-02c3-470c-a3d6-5a3355e3d77d"
 AZURE_CLIENT_ID = os.getenv("VITE_AZURE_CLIENT_ID")
 AZURE_ALGORITHMS = ["RS256"]
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 # Cache for Auth0 public keys
 _jwks_cache = None
@@ -110,54 +109,26 @@ def verify_auth0_token(token: str) -> dict:
     logger = logging.getLogger(__name__)
     
     try:
-        logger.debug(f"Verifying token, length: {len(token)}, type: {type(token)}")
-        
-        # Decode payload without verification
-        unverified = decode_token_payload(token)
-        logger.debug(f"Token claims decoded: sub={unverified.get('sub')}")
-        
-        # Verify the issuer is Auth0
-        issuer = unverified.get("iss")
-        expected_issuer = f"https://{AUTH0_DOMAIN}/"
-        
-        logger.debug(f"Issuer check: got={issuer}, expected={expected_issuer}")
-        
-        if issuer != expected_issuer:
-            logger.error(f"Invalid issuer: {issuer}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Invalid issuer: {issuer}"
-            )
-        
-        # Check token expiration
-        import time
-        now = time.time()
-        exp = unverified.get("exp")
-        logger.debug(f"Expiration check: exp={exp}, now={now}, expired={exp and exp < now}")
-        
-        if exp and exp < now:
-            logger.error(f"Token has expired: exp={exp}, now={now}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token has expired"
-            )
-        
-        logger.info(f"Token accepted for user: {unverified.get('sub')}")
-        return unverified
-        
-    except JWTError as e:
-        logger.error(f"JWT Error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid token: {str(e)}"
+        logger.debug(f"Verifying token via /userinfo, length: {len(token)}")
+        userinfo_url = f"https://{AUTH0_DOMAIN}/userinfo"
+        response = requests.get(
+            userinfo_url,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10
         )
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid access token"
+            )
+        return response.json()
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Token validation exception: {type(e).__name__}: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Token validation failed: {str(e)}"
+            detail="Token validation failed"
         )
 
 def verify_entra_id_token(token: str) -> dict:
@@ -239,18 +210,9 @@ def verify_entra_id_token(token: str) -> dict:
             detail=f"Entra ID token validation failed: {str(e)}"
         )
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
-    """
-    Dependency to get current user from Auth0 token
-    
-    Args:
-        credentials: HTTP Authorization header with Bearer token
-        
-    Returns:
-        Decoded token payload
-    """
-    token = credentials.credentials
-    return verify_auth0_token(token)
+def get_current_user(request: Request) -> dict:
+    """Dependency to get current user from cookie or Authorization header."""
+    return get_current_user_from_cookie(request)
 
 def get_current_user_from_cookie(request: Request) -> dict:
     """
@@ -287,35 +249,50 @@ def get_current_user_from_cookie(request: Request) -> dict:
         )
     
     # Try to determine token type by examining the issuer claim
-    try:
-        unverified = decode_token_payload(token)
-        issuer = unverified.get("iss", "")
-        
-        # Check if it's an Entra ID token
-        if "login.microsoftonline.com" in issuer:
-            logger.debug("Detected Entra ID token, verifying with Entra ID rules")
-            return verify_entra_id_token(token)
-        else:
-            logger.debug("Detected Auth0 token, verifying with Auth0 rules")
+    if token.count('.') == 2:
+        try:
+            unverified = decode_token_payload(token)
+            issuer = unverified.get("iss", "")
+
+            # Check if it's an Entra ID token
+            if "login.microsoftonline.com" in issuer or "sts.windows.net" in issuer:
+                logger.debug("Detected Entra ID token, verifying with Entra ID rules")
+                return verify_entra_id_token(token)
+            logger.debug("Detected JWT token, verifying with Auth0 rules")
             return verify_auth0_token(token)
-    except Exception as e:
-        logger.error(f"Token type detection failed: {e}, trying Auth0 validation")
-        return verify_auth0_token(token)
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Token type detection failed: {e}, trying Auth0 validation")
+            return verify_auth0_token(token)
+
+    # Opaque token: treat as Auth0 access token and use /userinfo
+    return verify_auth0_token(token)
 
 def extract_user_info(auth0_payload: dict) -> dict:
     """
-    Extract user information from Auth0 token payload
-    
+    Extract user information from Auth0 or Entra ID token payload
+
     Args:
-        auth0_payload: Decoded Auth0 token
-        
+        auth0_payload: Decoded token payload
+
     Returns:
         Dictionary with user information
     """
+    email = (
+        auth0_payload.get("email")
+        or auth0_payload.get("preferred_username")
+        or auth0_payload.get("upn")
+        or auth0_payload.get("unique_name")
+        or ""
+    )
+    full_name = auth0_payload.get("name") or auth0_payload.get("given_name") or ""
+    user_sub = auth0_payload.get("sub") or auth0_payload.get("oid")
+
     return {
-        "auth0_sub": auth0_payload.get("sub"),
-        "email": auth0_payload.get("email", "").lower(),
-        "full_name": auth0_payload.get("name", ""),
+        "auth0_sub": user_sub,
+        "email": email.lower(),
+        "full_name": full_name,
         "picture": auth0_payload.get("picture"),
         "email_verified": auth0_payload.get("email_verified", False)
     }

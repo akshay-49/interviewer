@@ -5,7 +5,7 @@ from typing import List, Optional
 import logging
 from backend.core.blob_storage import get_blob_manager
 from backend.interview.session_manager import SessionManager
-from backend.auth.auth0_utils import get_current_user
+from backend.auth.auth0_utils import get_current_user_from_cookie
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/recordings", tags=["Recordings"])
@@ -31,7 +31,7 @@ class SessionRecordings(BaseModel):
 async def upload_recording(
     session_id: str,
     file: UploadFile = File(...),
-    auth0_user: dict = Depends(get_current_user)
+    auth0_user: dict = Depends(get_current_user_from_cookie)
 ):
     """
     Upload a recording for a session
@@ -95,7 +95,7 @@ async def upload_recording(
 @router.get("/session/{session_id}")
 async def get_session_recordings(
     session_id: str,
-    auth0_user: dict = Depends(get_current_user)
+    auth0_user: dict = Depends(get_current_user_from_cookie)
 ):
     """Get all recordings for a session"""
     try:
@@ -126,7 +126,7 @@ async def get_session_recordings(
 
 
 @router.get("/user")
-async def get_user_recordings(auth0_user: dict = Depends(get_current_user)):
+async def get_user_recordings(auth0_user: dict = Depends(get_current_user_from_cookie)):
     """Get all sessions and recordings for the current user"""
     try:
         from backend.auth.auth0_utils import extract_user_info
@@ -152,7 +152,7 @@ async def get_user_recordings(auth0_user: dict = Depends(get_current_user)):
 async def delete_recording(
     session_id: str,
     file_name: str,
-    auth0_user: dict = Depends(get_current_user)
+    auth0_user: dict = Depends(get_current_user_from_cookie)
 ):
     """Delete a specific recording"""
     try:

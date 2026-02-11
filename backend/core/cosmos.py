@@ -187,10 +187,14 @@ def create_session(session_data: Dict[str, Any]) -> str:
 def get_session(session_id: str) -> Optional[Dict]:
     """Get session by session_id"""
     try:
-        query = "SELECT * FROM sessions WHERE sessions.session_id = @session_id"
+        query = (
+            "SELECT * FROM sessions "
+            "WHERE sessions.session_id = @session_id OR sessions.id = @session_id"
+        )
         items = list(sessions_container.query_items(
             query=query,
             parameters=[{"name": "@session_id", "value": session_id}],
+            enable_cross_partition_query=True,
             max_item_count=1
         ))
         return items[0] if items else None

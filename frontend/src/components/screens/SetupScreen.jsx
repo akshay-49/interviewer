@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useInterview } from '../../context/InterviewContext';
-import { api, speakText } from '../../utils/api';
+import { api, speakText, historyApi } from '../../utils/api';
 
 const SetupScreen = () => {
-    const { navigateTo, updateInterview, resetInterview, backendAvailable, theme, toggleTheme, user } = useInterview();
+    const { navigateTo, updateInterview, resetInterview, backendAvailable, theme, toggleTheme, user, updateUser } = useInterview();
     const [formData, setFormData] = useState({
         role: '',
         experience: '',
@@ -22,16 +22,59 @@ const SetupScreen = () => {
 
     // Auto-fill role and experience from user profile on mount
     useEffect(() => {
-        const jobTitle = localStorage.getItem('job_title');
-        const experienceLevel = localStorage.getItem('experience_level');
-        
-        if (jobTitle && !formData.role) {
-            setFormData(prev => ({ ...prev, role: jobTitle }));
-        }
-        if (experienceLevel && !formData.experience) {
-            setFormData(prev => ({ ...prev, experience: experienceLevel }));
-        }
-    }, []);
+        let isActive = true;
+
+        const loadProfile = async () => {
+            let currentUser = user;
+            if (!currentUser?.id) {
+                try {
+                    const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+                    const response = await fetch(`${apiBaseUrl}/auth/me`, {
+                        credentials: 'include'
+                    });
+                    if (response.ok) {
+                        const profile = await response.json();
+                        currentUser = {
+                            id: profile.id,
+                            name: profile.full_name || profile.email,
+                            email: profile.email,
+                            isLoggedIn: true,
+                            isAdmin: profile.email?.endsWith('@accellor.com') || false,
+                            picture: profile.picture,
+                        };
+                        updateUser(currentUser);
+                    }
+                } catch (error) {
+                    console.warn('Failed to load auth profile:', error);
+                }
+            }
+
+            if (!currentUser?.id) {
+                return;
+            }
+
+            try {
+                const profile = await historyApi.getUserProfile(currentUser.id);
+                if (!isActive || !profile) {
+                    return;
+                }
+
+                setFormData(prev => ({
+                    ...prev,
+                    role: prev.role || profile.job_title || '',
+                    experience: prev.experience || profile.experience_level || ''
+                }));
+            } catch (error) {
+                console.warn('Failed to load profile for autofill:', error);
+            }
+        };
+
+        loadProfile();
+
+        return () => {
+            isActive = false;
+        };
+    }, [updateUser, user]);
 
     // Close dropdowns when clicking outside
     useEffect(() => {
@@ -120,11 +163,11 @@ const SetupScreen = () => {
 
             updateInterview({
                 sessionId: result.session_id,
-                userId: user?.id || localStorage.getItem('user_id') || 'anonymous',
-                userEmail: user?.email || localStorage.getItem('user_email') || 'unknown@example.com',
-                userName: user?.name || localStorage.getItem('user_name'),
-                jobTitle: localStorage.getItem('job_title') || user?.jobTitle || role,
-                companyName: localStorage.getItem('company_name') || user?.companyName,
+                userId: user?.id || 'anonymous',
+                userEmail: user?.email || 'unknown@example.com',
+                userName: user?.name,
+                jobTitle: role,
+                companyName: '',
                 currentQuestion: result.question,
                 questionNumber: 1,
                 totalQuestions: result.total_questions || 5,

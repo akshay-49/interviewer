@@ -25,20 +25,41 @@ const UserSessionsScreen = () => {
 
             console.log('Loading sessions for user:', userId);
 
-            // Fetch user info
-            const userResponse = await fetch('http://localhost:8000/admin/users-cosmos');
+            const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
+            // Fetch user info (admin, fallback to cosmos)
+            let userData = null;
+            const userResponse = await fetch(`${apiBaseUrl}/auth/admin/users`, {
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include'
+            });
             if (userResponse.ok) {
-                const userData = await userResponse.json();
+                userData = await userResponse.json();
+            } else {
+                const cosmosResponse = await fetch(`${apiBaseUrl}/admin/users-cosmos`);
+                if (cosmosResponse.ok) {
+                    userData = await cosmosResponse.json();
+                }
+            }
+            if (userData?.users) {
                 const user = userData.users.find(u => u.id === userId);
                 setUserInfo(user);
             }
             
             // Fetch user sessions
-            const response = await fetch('http://localhost:8000/session/user-history', {
-                method: 'POST',
+            let response = await fetch(`${apiBaseUrl}/history/admin/user-sessions/${userId}?limit=50`, {
+                method: 'GET',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ user_id: userId })
+                credentials: 'include'
             });
+
+            if (response.status === 403) {
+                response = await fetch(`${apiBaseUrl}/session/user-history`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: userId })
+                });
+            }
 
             if (!response.ok) {
                 throw new Error('Failed to load sessions');

@@ -116,7 +116,7 @@ const ScreenManager = () => {
 
     // Check if we're on an auth screen
     const isAuthScreen = ['login', 'signup', 'forgot-password', 'custom-login', 'callback'].includes(currentScreen);
-    const isAdminScreen = ['admin-dashboard', 'invite-candidate'].includes(currentScreen);
+    const isAdminScreen = ['admin-dashboard', 'invite-candidate', 'user-sessions'].includes(currentScreen);
     const isInviteScreen = currentScreen === 'invite-acceptance';
     const showProfileMenu = !['admin-login', 'admin-dashboard', 'invite-candidate'].includes(currentScreen);
 

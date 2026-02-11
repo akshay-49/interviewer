@@ -43,22 +43,7 @@ const ReportScreen = () => {
             }
 
             console.log('Loading session data for:', sessionId);
-            
-            // Get user ID from localStorage
-            const userId = localStorage.getItem('user_id') || 'anonymous';
-            
-            // Fetch all user sessions
-            const sessions = await historyApi.getUserHistory(userId);
-            
-            // Find the matching session
-            const session = sessions.find(s => s.session_id === sessionId);
-            
-            if (!session) {
-                setError('Session not found');
-                setLoading(false);
-                return;
-            }
-
+            const session = await historyApi.getSessionDetails(sessionId);
             console.log('Session data loaded:', session);
             setSessionData(session);
             setError(null);

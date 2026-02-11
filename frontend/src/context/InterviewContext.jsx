@@ -28,18 +28,28 @@ export const InterviewProvider = ({ children }) => {
     const [backendAvailable, setBackendAvailable] = useState(false);
     const stopRecordingCallbackRef = useRef(null);
 
-    // Theme selection (light/dark) with system + localStorage preference
+    // Theme selection (light/dark) with localStorage preference
     const getPreferredTheme = () => {
         const stored = typeof window !== 'undefined' ? localStorage.getItem('theme') : null;
         if (stored === 'light' || stored === 'dark') return stored;
-        const prefersDark = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-        return prefersDark ? 'dark' : 'light';
+        return 'light';
     };
 
     const [theme, setTheme] = useState(getPreferredTheme);
 
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const resetKey = 'theme_reset_v1';
+        if (!localStorage.getItem(resetKey)) {
+            localStorage.removeItem('theme');
+            localStorage.setItem(resetKey, '1');
+            setTheme('light');
+        }
+    }, []);
+
     // User state (for profile, login, etc.)
     const [user, setUser] = useState({
+        id: null,
         name: 'Guest User',
         email: null,
         isLoggedIn: false,

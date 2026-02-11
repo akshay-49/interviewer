@@ -7,6 +7,8 @@ export default function QuestionBankScreen() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedRole, setSelectedRole] = useState('All Roles');
   const [selectedExperience, setSelectedExperience] = useState('All Experience');
+  const [availableRoles, setAvailableRoles] = useState(['All Roles']);
+  const [availableExperiences, setAvailableExperiences] = useState(['All Experience']);
   const [stats, setStats] = useState(null);
   const [selectedQuestions, setSelectedQuestions] = useState(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
@@ -54,6 +56,15 @@ export default function QuestionBankScreen() {
       }));
       
       setQuestions(formattedQuestions);
+
+      const roleSet = new Set();
+      const experienceSet = new Set();
+      formattedQuestions.forEach((question) => {
+        if (question.role) roleSet.add(question.role);
+        if (question.experience) experienceSet.add(question.experience);
+      });
+      setAvailableRoles(['All Roles', ...Array.from(roleSet).sort()]);
+      setAvailableExperiences(['All Experience', ...Array.from(experienceSet).sort()]);
     } catch (err) {
       console.error('❌ Error fetching questions:', err);
       setError(err.message);
@@ -109,9 +120,9 @@ export default function QuestionBankScreen() {
     return styles[color] || styles.blue;
   };
 
-  const handleApplyFilters = () => {
-    const roleToApply = selectedRole === 'All Roles' ? null : selectedRole;
-    const experienceToApply = selectedExperience === 'All Experience' ? null : selectedExperience;
+  const handleApplyFilters = (nextRole = selectedRole, nextExperience = selectedExperience) => {
+    const roleToApply = nextRole === 'All Roles' ? null : nextRole;
+    const experienceToApply = nextExperience === 'All Experience' ? null : nextExperience;
     fetchQuestions(null, roleToApply, experienceToApply);
   };
 
@@ -255,51 +266,49 @@ export default function QuestionBankScreen() {
             
             {/* Role Filters */}
             <div className="flex flex-col gap-2">
-              <label className="text-xs font-bold text-[#4c829a] uppercase tracking-wider">Role</label>
-              <div className="flex gap-2 flex-wrap">
-                {['All Roles', 'Frontend', 'Backend', 'DevOps', 'Data Science'].map((role) => (
-                  <button
-                    key={role}
-                    onClick={() => {
-                      setSelectedRole(role);
-                      if (role !== 'All Roles') {
-                        handleApplyFilters();
-                      }
-                    }}
-                    className={`h-9 px-4 rounded-lg text-sm font-semibold transition-all ${
-                      selectedRole === role
-                        ? 'bg-primary text-white shadow-lg shadow-primary/30'
-                        : 'bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-[#0d171b] dark:text-white hover:border-primary hover:bg-blue-50 dark:hover:bg-blue-900/20'
-                    }`}
-                  >
-                    {role}
-                  </button>
-                ))}
+              <label htmlFor="role-filter" className="text-xs font-bold text-[#4c829a] uppercase tracking-wider">Role</label>
+              <div className="relative">
+                <select
+                  id="role-filter"
+                  value={selectedRole}
+                  onChange={(e) => {
+                    const nextRole = e.target.value;
+                    setSelectedRole(nextRole);
+                    handleApplyFilters(nextRole, selectedExperience);
+                  }}
+                  className="w-full h-11 px-4 pr-10 rounded-lg text-sm font-semibold bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-[#0d171b] dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/30"
+                >
+                  {availableRoles.map((role) => (
+                    <option key={role} value={role}>
+                      {role}
+                    </option>
+                  ))}
+                </select>
+                <span className="material-symbols-outlined text-gray-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">expand_more</span>
               </div>
             </div>
 
             {/* Experience Filters */}
             <div className="flex flex-col gap-2">
-              <label className="text-xs font-bold text-[#4c829a] uppercase tracking-wider">Experience</label>
-              <div className="flex gap-2 flex-wrap">
-                {['All Experience', 'Intern', 'Entry-level', 'Junior', 'Mid-Level', 'Senior', 'Staff', 'Principal'].map((experience) => (
-                  <button
-                    key={experience}
-                    onClick={() => {
-                      setSelectedExperience(experience);
-                      if (experience !== 'All Experience') {
-                        handleApplyFilters();
-                      }
-                    }}
-                    className={`h-9 px-4 rounded-lg text-sm font-semibold transition-all ${
-                      selectedExperience === experience
-                        ? 'bg-primary text-white shadow-lg shadow-primary/30'
-                        : 'bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-[#0d171b] dark:text-white hover:border-primary hover:bg-blue-50 dark:hover:bg-blue-900/20'
-                    }`}
-                  >
-                    {experience}
-                  </button>
-                ))}
+              <label htmlFor="experience-filter" className="text-xs font-bold text-[#4c829a] uppercase tracking-wider">Experience</label>
+              <div className="relative">
+                <select
+                  id="experience-filter"
+                  value={selectedExperience}
+                  onChange={(e) => {
+                    const nextExperience = e.target.value;
+                    setSelectedExperience(nextExperience);
+                    handleApplyFilters(selectedRole, nextExperience);
+                  }}
+                  className="w-full h-11 px-4 pr-10 rounded-lg text-sm font-semibold bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-[#0d171b] dark:text-white focus:outline-none focus:ring-2 focus:ring-primary/30"
+                >
+                  {availableExperiences.map((experience) => (
+                    <option key={experience} value={experience}>
+                      {experience}
+                    </option>
+                  ))}
+                </select>
+                <span className="material-symbols-outlined text-gray-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">expand_more</span>
               </div>
             </div>
 
@@ -318,6 +327,7 @@ export default function QuestionBankScreen() {
                     setSelectedRole('All Roles');
                     setSelectedExperience('All Experience');
                     setSearchTerm('');
+                    handleApplyFilters('All Roles', 'All Experience');
                   }}
                   className="text-primary hover:text-primary/80 text-sm font-semibold flex items-center gap-1 transition-colors"
                 >

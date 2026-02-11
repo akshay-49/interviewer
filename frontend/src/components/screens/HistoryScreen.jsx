@@ -20,13 +20,7 @@ const HistoryScreen = () => {
     const loadSessions = async () => {
         try {
             setLoading(true);
-            // Get user ID from context or localStorage
-            const userId = localStorage.getItem('user_id') || 'anonymous';
-            
-            console.log('Loading sessions for user:', userId);
-            
-            // Fetch from Cosmos DB via new API endpoint
-            const data = await historyApi.getUserHistory(userId);
+            const data = await historyApi.getUserSessions();
             
             console.log('Received from Cosmos DB:', data);
             

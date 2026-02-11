@@ -4,88 +4,20 @@ import { getMsalInstance, loginRequest } from '../../utils/msalConfig';
 
 const CustomLoginScreen = () => {
     const { navigateTo, updateUser } = useInterview();
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
     const [error, setError] = useState('');
-    const [isSubmitting, setIsSubmitting] = useState(false);
     const [isMicrosoftLoginBusy, setIsMicrosoftLoginBusy] = useState(false);
     const msalInProgressRef = useRef(false);
 
     const handleLogin = async (e) => {
         e.preventDefault();
         setError('');
-        setIsSubmitting(true);
-
-        if (!email || !password) {
-            setError('Please enter both email and password');
-            setIsSubmitting(false);
-            return;
-        }
-
         try {
-            // Call backend login endpoint
-            const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/auth/login`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                credentials: 'include',  // Allow httpOnly cookie to be set
-                body: JSON.stringify({
-                    email: email,
-                    password: password
-                })
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json();
-                setError(errorData.detail || 'Invalid credentials. Please try again.');
-                setIsSubmitting(false);
-                return;
-            }
-
-            const data = await response.json();
-            
-            console.log('Full login response:', data);
-            console.log('Login response:', {
-                hasToken: !!data.access_token,
-                tokenType: typeof data.access_token,
-                tokenLength: data.access_token ? data.access_token.length : 0,
-                hasUser: !!data.user,
-                userEmail: data.user?.email,
-                responseKeys: Object.keys(data)
-            });
-            
-            // Store user data only (token is in httpOnly cookie)
-            localStorage.setItem('user', JSON.stringify(data.user));
-            localStorage.setItem('auth0_user_id', data.user.id);
-            localStorage.setItem('user_id', data.user.id);
-            localStorage.setItem('user_email', data.user.email);
-            localStorage.setItem('user_name', data.user.full_name);
-            
-            // Store token in sessionStorage as fallback (cleared when browser closes)
-            // This is temporary while debugging cookie issues
-            if (data.access_token) {
-                sessionStorage.setItem('access_token', data.access_token);
-                console.log('Token stored in sessionStorage');
-            } else {
-                console.warn('No access_token in login response!', Object.keys(data));
-            }
-            
-            // Update context with proper field names
-            updateUser({
-                name: data.user.full_name,
-                email: data.user.email,
-                isLoggedIn: true,
-                isAdmin: data.user.is_admin,
-                picture: data.user.picture,
-            });
-            
-            // Navigate to welcome screen
-            navigateTo('welcome');
+            const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+            const returnTo = `${window.location.origin}/callback`;
+            window.location.assign(`${apiBaseUrl}/auth/login?screen_hint=login&return_to=${encodeURIComponent(returnTo)}`);
         } catch (err) {
-            console.error('Login error:', err);
+            console.error('Auth0 login error:', err);
             setError('An error occurred. Please try again.');
-            setIsSubmitting(false);
         }
     };
 
@@ -212,7 +144,7 @@ const CustomLoginScreen = () => {
                             Sign In
                         </h1>
                         <p className="text-gray-600 dark:text-gray-300">
-                            Enter your credentials
+                            Continue with Auth0
                         </p>
                     </div>
 
@@ -226,41 +158,11 @@ const CustomLoginScreen = () => {
 
                     {/* Login Form */}
                     <form onSubmit={handleLogin} className="space-y-4">
-                        {/* Email Input */}
-                        <div>
-                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                                Email Address
-                            </label>
-                            <input
-                                type="email"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                placeholder="you@example.com"
-                                className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                            />
-                        </div>
-
-                        {/* Password Input */}
-                        <div>
-                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                                Password
-                            </label>
-                            <input
-                                type="password"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                                placeholder="••••••••"
-                                className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
-                            />
-                        </div>
-
-                        {/* Sign In Button */}
                         <button
                             type="submit"
-                            disabled={isSubmitting}
-                            className="w-full px-6 py-3 bg-primary text-white font-semibold rounded-lg hover:bg-primary/90 active:scale-[0.98] transition-all shadow-md shadow-primary/30 disabled:opacity-50 disabled:cursor-not-allowed mt-6"
+                            className="w-full px-6 py-3 bg-primary text-white font-semibold rounded-lg hover:bg-primary/90 active:scale-[0.98] transition-all shadow-md shadow-primary/30"
                         >
-                            {isSubmitting ? 'Signing in...' : 'Sign In'}
+                            Continue with Auth0
                         </button>
                     </form>
 

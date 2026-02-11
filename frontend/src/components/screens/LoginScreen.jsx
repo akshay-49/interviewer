@@ -1,10 +1,8 @@
 import React, { useState } from 'react';
-import { useAuth0 } from '@auth0/auth0-react';
 import { useInterview } from '../../context/InterviewContext';
 
 const LoginScreen = () => {
     const { navigateTo, updateUser } = useInterview();
-    const { loginWithRedirect } = useAuth0();
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
 
@@ -14,13 +12,9 @@ const LoginScreen = () => {
         setIsLoading(true);
 
         try {
-            await loginWithRedirect({
-                authorizationParams: {
-                    screen_hint: 'login',
-                    audience: import.meta.env.VITE_AUTH0_AUDIENCE,
-                    scope: 'openid profile email',
-                },
-            });
+            const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+            const returnTo = `${window.location.origin}/callback`;
+            window.location.assign(`${apiBaseUrl}/auth/login?screen_hint=login&return_to=${encodeURIComponent(returnTo)}`);
         } catch (err) {
             console.error('Login error:', err);
             setError('Login failed. Please try again.');
@@ -43,10 +37,10 @@ const LoginScreen = () => {
                             <span className="material-symbols-outlined text-3xl text-primary">verified_user</span>
                         </div>
                         <h1 className="text-3xl font-black text-gray-900 dark:text-white mb-2">
-                            Admin & Candidate Login
+                            Candidate Login
                         </h1>
                         <p className="text-gray-600 dark:text-gray-300">
-                            Use your Accellor account to continue.
+                            Log in into your account to continue.
                         </p>
                     </div>
 
@@ -65,7 +59,7 @@ const LoginScreen = () => {
                             disabled={isLoading}
                             className="w-full px-6 py-3 bg-primary text-white font-bold rounded-xl hover:bg-primary/90 active:scale-[0.98] transition-all shadow-lg shadow-primary/30 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                            {isLoading ? 'Redirecting...' : 'Continue with Auth0'}
+                            {isLoading ? 'Redirecting...' : 'Login'}
                         </button>
                     </form>
 

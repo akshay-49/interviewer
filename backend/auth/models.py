@@ -1,16 +1,16 @@
-"""User authentication models for Cosmos DB (MongoDB) with Auth0"""
+"""User authentication models for Cosmos DB (MongoDB)"""
 from datetime import datetime
 from bson import ObjectId
 from typing import Optional
 
 class User:
-    """User document model for MongoDB with Auth0 integration"""
+    """User document model for MongoDB"""
     
     def __init__(
         self,
         email: str,
         full_name: str,
-        auth0_sub: Optional[str] = None,  # Auth0 user ID
+        user_sub: Optional[str] = None,  # External subject ID (Auth0)
         picture: Optional[str] = None,
         is_active: bool = True,
         is_admin: bool = False,
@@ -21,7 +21,7 @@ class User:
         self._id = _id or ObjectId()
         self.email = email
         self.full_name = full_name
-        self.auth0_sub = auth0_sub
+        self.user_sub = user_sub
         self.picture = picture
         self.is_active = is_active
         self.is_admin = is_admin
@@ -34,7 +34,7 @@ class User:
             "_id": self._id,
             "email": self.email,
             "full_name": self.full_name,
-            "auth0_sub": self.auth0_sub,
+            "user_sub": self.user_sub,
             "picture": self.picture,
             "is_active": self.is_active,
             "is_admin": self.is_admin,

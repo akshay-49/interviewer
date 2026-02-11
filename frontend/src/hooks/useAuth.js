@@ -1,31 +1,45 @@
-import { useAuth0 } from '@auth0/auth0-react';
-import { useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 /**
  * Custom hook to manage Auth0 authentication
  */
 export const useAuth = () => {
-    const { isAuthenticated, user, loginWithRedirect, logout: auth0Logout, isLoading } = useAuth0();
+    const [user, setUser] = useState(null);
+    const [isLoading, setIsLoading] = useState(true);
+
+    const fetchMe = useCallback(async () => {
+        const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+        try {
+            const response = await fetch(`${apiBaseUrl}/auth/me`, { credentials: 'include' });
+            if (response.ok) {
+                const data = await response.json();
+                setUser(data);
+            } else {
+                setUser(null);
+            }
+        } finally {
+            setIsLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        fetchMe();
+    }, [fetchMe]);
 
     const login = useCallback(async () => {
-        await loginWithRedirect({
-            authorizationParams: {
-                screen_hint: 'login',
-                prompt: 'login',
-            },
-        });
-    }, [loginWithRedirect]);
+        const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+        const returnTo = `${window.location.origin}/callback`;
+        window.location.assign(`${apiBaseUrl}/auth/login?screen_hint=login&return_to=${encodeURIComponent(returnTo)}`);
+    }, []);
 
     const logout = useCallback(() => {
-        auth0Logout({
-            logoutParams: {
-                returnTo: window.location.origin,
-            },
-        });
-    }, [auth0Logout]);
+        const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+        const returnTo = `${window.location.origin}/login`;
+        window.location.assign(`${apiBaseUrl}/auth/logout?return_to=${encodeURIComponent(returnTo)}`);
+    }, []);
 
     return {
-        isAuthenticated,
+        isAuthenticated: !!user,
         isLoading,
         user,
         login,

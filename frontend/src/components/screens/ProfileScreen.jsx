@@ -3,7 +3,7 @@ import { useInterview } from '../../context/InterviewContext';
 import { historyApi } from '../../utils/api';
 
 const ProfileScreen = () => {
-    const { navigateTo, theme, user: contextUser } = useInterview();
+    const { navigateTo, theme, user: contextUser, updateUser } = useInterview();
     const [formData, setFormData] = useState({
         user_id: '',
         user_name: '',
@@ -19,71 +19,67 @@ const ProfileScreen = () => {
     // Load saved data from localStorage AND Cosmos DB on mount
     useEffect(() => {
         loadProfile();
-    }, []);
+    }, [contextUser?.id]);
 
     const loadProfile = async () => {
-        // First, get user_id from localStorage
-        const userId = localStorage.getItem('user_id');
-        
-        if (userId) {
-            setLoading(true);
+        setLoading(true);
+
+        let authProfile = null;
+        let userId = contextUser?.id || '';
+
+        if (!userId) {
             try {
-                // Try to fetch from Cosmos DB
-                const profile = await historyApi.getUserProfile(userId);
-                
-                if (profile) {
-                    // Use Cosmos DB data
-                    const profileData = {
-                        user_id: profile.user_id,
-                        user_name: profile.user_name || '',
-                        user_email: profile.user_email || '',
-                        job_title: profile.job_title || '',
-                        company_name: profile.company_name || '',
-                        experience_level: profile.experience_level || ''
-                    };
-                    setFormData(profileData);
-                    
-                    // Also update localStorage to sync
-                    Object.entries(profileData).forEach(([key, value]) => {
-                        localStorage.setItem(key, value);
+                const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+                const response = await fetch(`${apiBaseUrl}/auth/me`, {
+                    credentials: 'include'
+                });
+                if (response.ok) {
+                    authProfile = await response.json();
+                    userId = authProfile?.id || '';
+                    updateUser({
+                        id: authProfile?.id || null,
+                        name: authProfile?.full_name || authProfile?.email || 'User',
+                        email: authProfile?.email || null,
+                        isLoggedIn: true,
+                        isAdmin: authProfile?.email?.endsWith('@accellor.com') || false,
+                        picture: authProfile?.picture,
                     });
-                } else {
-                    // Fall back to localStorage only
-                    loadFromLocalStorage();
                 }
             } catch (error) {
-                console.error('Failed to load profile from Cosmos:', error);
-                // Fall back to localStorage
-                loadFromLocalStorage();
-            } finally {
-                setLoading(false);
+                console.error('Failed to load auth profile:', error);
             }
-        } else {
-            // No user_id yet, load from localStorage
-            loadFromLocalStorage();
         }
-    };
 
-    const loadFromLocalStorage = () => {
-        const storedEmail = localStorage.getItem('user_email');
-        const contextEmail = contextUser?.email;
-        
-        // If stored email exists and differs from context email, clear storage
-        if (contextEmail && storedEmail && storedEmail !== contextEmail) {
-            ['user_id', 'user_name', 'user_email', 'job_title', 'company_name', 'experience_level'].forEach((key) => {
-                localStorage.removeItem(key);
-            });
+        if (!userId) {
+            setLoading(false);
+            return;
         }
-        
-        const savedData = {
-            user_id: localStorage.getItem('user_id') || '',
-            user_name: localStorage.getItem('user_name') || contextUser?.name || '',
-            user_email: localStorage.getItem('user_email') || contextUser?.email || '',
-            job_title: localStorage.getItem('job_title') || '',
-            company_name: localStorage.getItem('company_name') || '',
-            experience_level: localStorage.getItem('experience_level') || ''
-        };
-        setFormData(savedData);
+
+        try {
+            const profile = await historyApi.getUserProfile(userId);
+            if (profile) {
+                const profileData = {
+                    user_id: profile.user_id,
+                    user_name: profile.user_name || authProfile?.full_name || contextUser?.name || '',
+                    user_email: profile.user_email || authProfile?.email || contextUser?.email || '',
+                    job_title: profile.job_title || '',
+                    company_name: profile.company_name || '',
+                    experience_level: profile.experience_level || ''
+                };
+                setFormData(profileData);
+            } else {
+                setFormData(prev => ({
+                    ...prev,
+                    user_id: userId,
+                    user_name: authProfile?.full_name || contextUser?.name || prev.user_name,
+                    user_email: authProfile?.email || contextUser?.email || prev.user_email
+                }));
+            }
+        } catch (error) {
+            console.error('Failed to load profile from Cosmos:', error);
+        } finally {
+            setLoading(false);
+        }
     };
 
     const handleChange = (e) => {
@@ -129,11 +125,6 @@ const ProfileScreen = () => {
         setLoading(true);
         
         try {
-            // Save to localStorage
-            Object.entries(formData).forEach(([key, value]) => {
-                localStorage.setItem(key, value);
-            });
-
             // Save to Cosmos DB
             await historyApi.saveUserProfile({
                 user_id: formData.user_id,
@@ -142,6 +133,12 @@ const ProfileScreen = () => {
                 job_title: formData.job_title,
                 company_name: formData.company_name,
                 experience_level: formData.experience_level
+            });
+
+            updateUser({
+                id: formData.user_id,
+                name: formData.user_name,
+                email: formData.user_email,
             });
 
             setSaved(true);

@@ -1,145 +1,183 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useAuth0 } from '@auth0/auth0-react';
 import { useInterview } from '../../context/InterviewContext';
-import { api } from '../../utils/api';
+import { api, historyApi } from '../../utils/api';
 
 const CallbackPage = () => {
-    const { isAuthenticated, user, isLoading, getAccessTokenSilently, getIdTokenClaims } = useAuth0();
     const { navigateTo, updateUser, updateInterview, resetInterview } = useInterview();
     const [startingInterview, setStartingInterview] = useState(false);
     const [startError, setStartError] = useState('');
+    const [isLoading, setIsLoading] = useState(true);
     const handledRef = useRef(false);
 
     useEffect(() => {
-        const finalizeInvite = async () => {
-            const inviteCode = localStorage.getItem('invite_code');
+        const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+        const inviteCode = new URLSearchParams(window.location.search).get('invite_code');
+
+        const fetchCurrentUser = async () => {
             try {
-                let token = null;
-                try {
-                    const idTokenClaims = await getIdTokenClaims();
-                    token = idTokenClaims?.__raw || null;
-                } catch (error) {
-                    console.warn('Failed to get ID token claims:', error);
+                const response = await fetch(`${apiBaseUrl}/auth/me`, {
+                    credentials: 'include'
+                });
+                if (response.ok) {
+                    return await response.json();
                 }
+            } catch (error) {
+                console.warn('Failed to load user profile:', error);
+            }
+            return null;
+        };
 
-                if (!token) {
-                    token = await getAccessTokenSilently({
-                        authorizationParams: {
-                            audience: import.meta.env.VITE_AUTH0_AUDIENCE,
-                            scope: 'openid profile email',
-                        },
-                    });
+        const syncUser = async () => {
+            try {
+                const response = await fetch(`${apiBaseUrl}/auth/sync-user`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    credentials: 'include'
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    console.warn('User sync failed:', errorData.detail || response.statusText);
                 }
+            } catch (error) {
+                console.warn('User sync error:', error);
+            }
+        };
 
-                const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-                if (inviteCode) {
-                    const response = await fetch(`${apiBaseUrl}/auth/accept-invite`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            Authorization: `Bearer ${token}`,
-                        },
-                        body: JSON.stringify({ invite_code: inviteCode })
-                    });
+        const fetchInvite = async (code) => {
+            const response = await fetch(`${apiBaseUrl}/admin/validate-invite`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ invite_code: code })
+            });
 
-                    if (!response.ok) {
-                        const errorData = await response.json();
-                        console.warn('Invite finalize failed:', errorData.detail || response.statusText);
-                    }
-                } else {
-                    const response = await fetch(`${apiBaseUrl}/auth/sync-user`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            Authorization: `Bearer ${token}`,
-                        }
-                    });
+            if (!response.ok) {
+                throw new Error('Invalid or expired invite link');
+            }
 
-                    if (!response.ok) {
-                        const errorData = await response.json();
-                        console.warn('User sync failed:', errorData.detail || response.statusText);
-                    }
+            const data = await response.json();
+            return data.invite || null;
+        };
+
+        const acceptInvite = async (code) => {
+            try {
+                const response = await fetch(`${apiBaseUrl}/auth/accept-invite`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({ invite_code: code })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    console.warn('Invite finalize failed:', errorData.detail || response.statusText);
                 }
             } catch (error) {
                 console.warn('Invite finalize error:', error);
-            } finally {
-                localStorage.removeItem('invite_code');
             }
         };
 
         const handlePostLogin = async () => {
-            // Update app state with user info
+            const profile = await fetchCurrentUser();
+
+            if (!profile) {
+                setIsLoading(false);
+                navigateTo('login', null, true);
+                return;
+            }
+
             updateUser({
-                name: user.name || user.email,
-                email: user.email,
+                id: profile.id,
+                name: profile.full_name || profile.email,
+                email: profile.email,
                 isLoggedIn: true,
-                isAdmin: user.email?.endsWith('@accellor.com') || false,
-                picture: user.picture,
+                isAdmin: profile.email?.endsWith('@accellor.com') || false,
+                picture: profile.picture,
             });
 
-            await finalizeInvite();
+            if (inviteCode) {
+                setStartingInterview(true);
+                setStartError('');
 
-            const invitePayloadRaw = localStorage.getItem('invite_payload');
-            if (invitePayloadRaw) {
                 try {
-                    const invitePayload = JSON.parse(invitePayloadRaw);
-                    localStorage.removeItem('invite_payload');
-                    setStartingInterview(true);
-                    setStartError('');
-                    const role = invitePayload.role || 'Software Engineer';
-                    const experience = invitePayload.level || 'Mid-Level';
-                    const roleDescription = invitePayload.jobDescription || '';
-                    const persona = invitePayload.persona || 'strict';
-
-                    try {
-                        resetInterview();
-                        const result = await api.startInterview(role, experience, roleDescription, persona);
-
-                        updateInterview({
-                            sessionId: result.session_id,
-                            userId: result.user_id || localStorage.getItem('user_id') || user.sub || 'anonymous',
-                            userEmail: result.user_email || user.email || localStorage.getItem('user_email') || 'unknown@example.com',
-                            userName: result.user_name || user.name || localStorage.getItem('user_name'),
-                            jobTitle: localStorage.getItem('job_title') || role,
-                            companyName: localStorage.getItem('company_name'),
-                            currentQuestion: result.question,
-                            questionNumber: 1,
-                            totalQuestions: result.total_questions || 5,
-                            role,
-                            experience,
-                            roleDescription,
-                            persona,
-                            roleDisplay: `${experience} ${role} Interview`,
-                            questionText: result.question,
-                            startedAt: new Date().toISOString(),
-                        });
-
-                        navigateTo('interview');
-                        return;
-                    } catch (error) {
-                        console.warn('Auto-start interview failed:', error);
-                        setStartError('Failed to start interview. Please try again.');
-                        setStartingInterview(false);
-                        return;
+                    const invite = await fetchInvite(inviteCode);
+                    if (!invite) {
+                        throw new Error('Invite not found');
                     }
+
+                    const role = invite.role || 'Software Engineer';
+                    const experience = invite.seniority_level || 'Mid-Level';
+                    const roleDescription = invite.job_description || '';
+                    const persona = 'strict';
+
+                    if (profile.id) {
+                        try {
+                            await historyApi.saveUserProfile({
+                                user_id: profile.id,
+                                user_name: invite.candidate_name || profile.full_name || profile.email,
+                                user_email: invite.candidate_email || profile.email,
+                                job_title: role,
+                                company_name: '',
+                                experience_level: experience
+                            });
+                        } catch (error) {
+                            console.warn('Failed to save profile to Cosmos:', error);
+                        }
+                    }
+
+                    resetInterview();
+                    const result = await api.startInterview(role, experience, roleDescription, persona);
+
+                    updateInterview({
+                        sessionId: result.session_id,
+                        userId: result.user_id || profile.id || 'anonymous',
+                        userEmail: result.user_email || profile.email || 'unknown@example.com',
+                        userName: result.user_name || profile.full_name || profile.email,
+                        jobTitle: role,
+                        companyName: '',
+                        currentQuestion: result.question,
+                        questionNumber: 1,
+                        totalQuestions: result.total_questions || 5,
+                        role,
+                        experience,
+                        roleDescription,
+                        persona,
+                        roleDisplay: `${experience} ${role} Interview`,
+                        questionText: result.question,
+                        startedAt: new Date().toISOString(),
+                    });
+
+                    await acceptInvite(inviteCode);
+                    navigateTo('interview');
+                    return;
                 } catch (error) {
-                    console.warn('Invalid invite payload:', error);
-                    localStorage.removeItem('invite_payload');
+                    console.warn('Auto-start interview failed:', error);
+                    setStartError('Failed to start interview. Please try again.');
+                    setStartingInterview(false);
+                    setIsLoading(false);
+                    return;
                 }
             }
 
-            // Redirect to appropriate screen
-            const isAdmin = user.email?.endsWith('@accellor.com') || false;
+            await syncUser();
+
+            const isAdmin = profile.email?.endsWith('@accellor.com') || false;
             navigateTo(isAdmin ? 'admin-dashboard' : 'welcome');
+            setIsLoading(false);
         };
 
-        if (!isLoading && isAuthenticated && user && !handledRef.current) {
+        if (!handledRef.current) {
             handledRef.current = true;
             handlePostLogin();
         }
-    }, [getAccessTokenSilently, getIdTokenClaims, isAuthenticated, isLoading, navigateTo, resetInterview, updateInterview, updateUser, user]);
 
-    if (isLoading || startingInterview) {
+    }, [navigateTo, resetInterview, updateInterview, updateUser]);
+
+    if (startingInterview || isLoading) {
         return (
             <div className="w-screen h-screen flex items-center justify-center bg-background-light dark:bg-background-dark">
                 <div className="text-center">

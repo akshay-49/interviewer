@@ -61,7 +61,7 @@ const AdminDashboardScreen = () => {
             });
             resetInterview();
             
-            // Call Auth0 logout
+            // Call logout
             await logout();
         } catch (error) {
             console.error('Logout error:', error);
@@ -375,18 +375,6 @@ const AdminDashboardScreen = () => {
                                 className={`text-sm font-semibold transition-colors ${activeTab === 'invites' ? 'text-primary font-bold' : 'text-[#4c8e9a] hover:text-primary'}`}
                             >
                                 Invites
-                            </button>
-                            <button 
-                                onClick={() => setActiveTab('analytics')}
-                                className={`text-sm font-semibold transition-colors ${activeTab === 'analytics' ? 'text-primary font-bold' : 'text-[#4c8e9a] hover:text-primary'}`}
-                            >
-                                Analytics
-                            </button>
-                            <button 
-                                onClick={() => setActiveTab('settings')}
-                                className={`text-sm font-semibold transition-colors ${activeTab === 'settings' ? 'text-primary font-bold' : 'text-[#4c8e9a] hover:text-primary'}`}
-                            >
-                                Settings
                             </button>
                         </nav>
                     </div>

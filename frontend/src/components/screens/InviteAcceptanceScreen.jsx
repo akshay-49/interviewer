@@ -1,10 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { useAuth0 } from '@auth0/auth0-react';
 import { useInterview } from '../../context/InterviewContext';
 
 const InviteAcceptanceScreen = ({ inviteCode }) => {
     const { navigateTo } = useInterview();
-    const { loginWithRedirect } = useAuth0();
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [inviteData, setInviteData] = useState(null);
@@ -32,7 +30,6 @@ const InviteAcceptanceScreen = ({ inviteCode }) => {
                 setLoading(false);
             }
         };
-
         if (inviteCode) {
             validateInvite();
         }
@@ -43,32 +40,15 @@ const InviteAcceptanceScreen = ({ inviteCode }) => {
         setError('');
 
         try {
-            if (inviteCode) {
-                localStorage.setItem('invite_code', inviteCode);
-            }
-
-            if (inviteData) {
-                const invitePayload = {
-                    role: inviteData.role || 'Software Engineer',
-                    level: inviteData.seniority_level || 'Mid-Level',
-                    jobDescription: inviteData.job_description || '',
-                    persona: 'strict'
-                };
-                localStorage.setItem('invite_payload', JSON.stringify(invitePayload));
-                localStorage.setItem('job_title', invitePayload.role);
-                localStorage.setItem('experience_level', invitePayload.level);
-            }
-
-            await loginWithRedirect({
-                authorizationParams: {
-                    screen_hint: 'signup',
-                    login_hint: inviteData?.candidate_email,
-                    audience: import.meta.env.VITE_AUTH0_AUDIENCE,
-                    scope: 'openid profile email',
-                    prompt: 'login',
-                },
-                appState: { invite_code: inviteCode }
+            const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+            const returnTo = `${window.location.origin}/callback?invite_code=${encodeURIComponent(inviteCode || '')}`;
+            const loginHint = inviteData?.candidate_email || '';
+            const params = new URLSearchParams({
+                screen_hint: 'signup',
+                login_hint: loginHint,
+                return_to: returnTo
             });
+            window.location.assign(`${apiBaseUrl}/auth/login?${params.toString()}`);
         } catch (err) {
             console.error('Error starting sign up:', err);
             setError(err.message || 'Failed to start sign up');
@@ -92,10 +72,10 @@ const InviteAcceptanceScreen = ({ inviteCode }) => {
 
     if (error) {
         return (
-            <div className="min-h-screen bg-gradient-to-br from-red-50 to-[#f6f8f8] flex items-center justify-center p-4">
-                <div className="bg-white rounded-xl border border-red-200 shadow-lg p-8 max-w-md text-center">
-                    <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center mx-auto mb-4">
-                        <span className="material-symbols-outlined text-red-600 text-4xl">error</span>
+            <div className="min-h-screen bg-gradient-to-br from-primary/10 to-[#f6f8f8] flex items-center justify-center p-4">
+                <div className="text-center">
+                    <div className="w-16 h-16 rounded-full bg-primary/20 flex items-center justify-center mx-auto mb-4">
+                        <span className="material-symbols-outlined text-primary text-4xl">error</span>
                     </div>
                     <h2 className="text-2xl font-bold text-[#0d191b] mb-2">Invalid Invite</h2>
                     <p className="text-[#4c8e9a] mb-6">{error}</p>

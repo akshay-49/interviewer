@@ -1165,15 +1165,29 @@ def validate_invite(req: dict):
         if not invite.get("access_enabled", True):
             raise HTTPException(status_code=403, detail="This invite link is no longer active. Please contact your admin.")
         
+        candidate_email = invite.get("candidate_email")
+        user_exists = False
+
+        try:
+            from backend.core.auth0_manager import Auth0Manager
+
+            if candidate_email:
+                auth0_manager = Auth0Manager()
+                auth0_user = auth0_manager.get_user_by_email(candidate_email)
+                user_exists = bool(auth0_user)
+        except Exception as e:
+            logger.warning(f"Failed to check existing Auth0 user for invite: {e}")
+
         return {
             "success": True,
             "invite": {
                 "candidate_name": invite.get("candidate_name"),
-                "candidate_email": invite.get("candidate_email"),
+                "candidate_email": candidate_email,
                 "seniority_level": invite.get("seniority_level"),
                 "role": invite.get("role"),
                 "job_description": invite.get("job_description"),
-                "invite_code": invite_code
+                "invite_code": invite_code,
+                "user_exists": user_exists
             }
         }
     except HTTPException:
@@ -1404,26 +1418,9 @@ def delete_invite(invite_code: str):
         # Delete from invites container
         invites_container.delete_item(item=invite["id"], partition_key=invite.get("invite_code"))
         
-        # Delete from users container if user_id exists
-        if user_id:
-            try:
-                user_query = "SELECT * FROM users WHERE users.user_id = @id"
-                user_items = list(users_container.query_items(
-                    query=user_query,
-                    parameters=[{"name": "@id", "value": user_id}],
-                    max_item_count=1,
-                    enable_cross_partition_query=True
-                ))
-                
-                if user_items:
-                    user = user_items[0]
-                    users_container.delete_item(item=user["id"], partition_key=user.get("user_id"))
-            except Exception as e:
-                logger.warning(f"Could not delete user record: {e}")
-        
         return {
             "success": True,
-            "message": f"Invite revoked and user access removed"
+            "message": "Invite revoked"
         }
     except HTTPException:
         raise
@@ -1649,47 +1646,51 @@ async def get_admin_analytics():
     """
     try:
         from backend.core.cosmos import sessions_container
-        from datetime import datetime, timedelta
-        
+        from datetime import datetime, timezone
+
+        def to_utc_dt(value):
+            if not value:
+                return None
+            if isinstance(value, str):
+                try:
+                    dt_value = datetime.fromisoformat(value.replace('Z', '+00:00'))
+                except Exception:
+                    return None
+            else:
+                dt_value = value
+            if dt_value.tzinfo is None:
+                return dt_value.replace(tzinfo=timezone.utc)
+            return dt_value.astimezone(timezone.utc)
+
         # Get all sessions
         query = "SELECT c.overall_score, c.completed_at FROM sessions c"
         all_sessions = list(sessions_container.query_items(
             query=query,
             enable_cross_partition_query=True
         ))
-        
+
         total_sessions = len(all_sessions)
-        
+
         # Calculate today's sessions (completed today)
-        now = datetime.utcnow()
-        today_start = datetime(now.year, now.month, now.day, 0, 0, 0)
-        
+        now = datetime.now(timezone.utc)
+        today_start = datetime(now.year, now.month, now.day, 0, 0, 0, tzinfo=timezone.utc)
+
         today_sessions = 0
         completed_scores = []
-        
+
         for session in all_sessions:
-            completed_at = session.get('completed_at')
-            if completed_at:
-                # Parse the timestamp if it's a string
-                if isinstance(completed_at, str):
-                    try:
-                        completed_date = datetime.fromisoformat(completed_at.replace('Z', '+00:00'))
-                    except:
-                        completed_date = None
-                else:
-                    completed_date = completed_at
-                
-                if completed_date and completed_date >= today_start:
-                    today_sessions += 1
-            
+            completed_date = to_utc_dt(session.get('completed_at'))
+            if completed_date and completed_date >= today_start:
+                today_sessions += 1
+
             # Collect scores for average
             score = session.get('overall_score')
             if score is not None:
                 completed_scores.append(score)
-        
+
         # Calculate average score
         average_score = sum(completed_scores) / len(completed_scores) if completed_scores else 0
-        
+
         return {
             "success": True,
             "total_sessions": total_sessions,
@@ -1697,7 +1698,7 @@ async def get_admin_analytics():
             "average_score": average_score,
             "active_sessions": 0  # Would need WebSocket for real-time
         }
-        
+
     except Exception as e:
         logger.error(f"Error fetching admin analytics: {e}")
         # Return default values on error instead of raising
@@ -1717,12 +1718,26 @@ async def get_recent_activity(limit: int = 10):
     """
     try:
         from backend.core.cosmos import users_container, sessions_container
-        from datetime import datetime, timedelta
-        
+        from datetime import datetime, timezone
+
+        def to_utc_dt(value):
+            if not value:
+                return None
+            if isinstance(value, str):
+                try:
+                    dt_value = datetime.fromisoformat(value.replace('Z', '+00:00'))
+                except Exception:
+                    return None
+            else:
+                dt_value = value
+            if dt_value.tzinfo is None:
+                return dt_value.replace(tzinfo=timezone.utc)
+            return dt_value.astimezone(timezone.utc)
+
         activities = []
-        now = datetime.utcnow()
-        
-        # Get recently created users (last 24 hours)
+        now = datetime.now(timezone.utc)
+
+        # Get recently created users (last 7 days)
         try:
             user_query = "SELECT c.user_name, c.user_email, c.created_at FROM users c ORDER BY c.created_at DESC"
             recent_users = list(users_container.query_items(
@@ -1730,40 +1745,31 @@ async def get_recent_activity(limit: int = 10):
                 enable_cross_partition_query=True,
                 max_item_count=50
             ))
-            
-            for user in recent_users[:5]:  # Top 5 recent users
-                created_at = user.get('created_at')
-                if created_at:
-                    if isinstance(created_at, str):
-                        try:
-                            created_date = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                        except:
-                            created_date = None
-                    else:
-                        created_date = created_at
-                    
-                    if created_date and (now - created_date).days <= 7:  # Within last 7 days
-                        time_diff = now - created_date
-                        if time_diff.days == 0:
-                            if time_diff.seconds < 3600:
-                                time_ago = f"{time_diff.seconds // 60} minutes ago"
-                            else:
-                                time_ago = f"{time_diff.seconds // 3600} hours ago"
+
+            for user in recent_users[:5]:
+                created_date = to_utc_dt(user.get('created_at'))
+                if created_date and (now - created_date).days <= 7:
+                    time_diff = now - created_date
+                    if time_diff.days == 0:
+                        if time_diff.seconds < 3600:
+                            time_ago = f"{time_diff.seconds // 60} minutes ago"
                         else:
-                            time_ago = f"{time_diff.days} days ago"
-                        
-                        activities.append({
-                            "type": "user_registered",
-                            "icon": "person_add",
-                            "title": f"New user registered",
-                            "description": user.get('user_name') or user.get('user_email', 'Unknown'),
-                            "time_ago": time_ago,
-                            "timestamp": created_at
-                        })
+                            time_ago = f"{time_diff.seconds // 3600} hours ago"
+                    else:
+                        time_ago = f"{time_diff.days} days ago"
+
+                    activities.append({
+                        "type": "user_registered",
+                        "icon": "person_add",
+                        "title": "New user registered",
+                        "description": user.get('user_name') or user.get('user_email', 'Unknown'),
+                        "time_ago": time_ago,
+                        "timestamp": created_date
+                    })
         except Exception as e:
             logger.warning(f"Error fetching recent users: {e}")
-        
-        # Get recently completed interviews (last 24 hours)
+
+        # Get recently completed interviews (last 7 days)
         try:
             session_query = "SELECT c.user_name, c.overall_score, c.completed_at FROM sessions c WHERE c.completed_at != null ORDER BY c.completed_at DESC"
             recent_sessions = list(sessions_container.query_items(
@@ -1771,49 +1777,45 @@ async def get_recent_activity(limit: int = 10):
                 enable_cross_partition_query=True,
                 max_item_count=50
             ))
-            
-            for session in recent_sessions[:5]:  # Top 5 recent sessions
-                completed_at = session.get('completed_at')
-                if completed_at:
-                    if isinstance(completed_at, str):
-                        try:
-                            completed_date = datetime.fromisoformat(completed_at.replace('Z', '+00:00'))
-                        except:
-                            completed_date = None
-                    else:
-                        completed_date = completed_at
-                    
-                    if completed_date and (now - completed_date).days <= 7:
-                        time_diff = now - completed_date
-                        if time_diff.days == 0:
-                            if time_diff.seconds < 3600:
-                                time_ago = f"{time_diff.seconds // 60} minutes ago"
-                            else:
-                                time_ago = f"{time_diff.seconds // 3600} hours ago"
+
+            for session in recent_sessions[:5]:
+                completed_date = to_utc_dt(session.get('completed_at'))
+                if completed_date and (now - completed_date).days <= 7:
+                    time_diff = now - completed_date
+                    if time_diff.days == 0:
+                        if time_diff.seconds < 3600:
+                            time_ago = f"{time_diff.seconds // 60} minutes ago"
                         else:
-                            time_ago = f"{time_diff.days} days ago"
-                        
-                        score = session.get('overall_score', 0)
-                        activities.append({
-                            "type": "interview_completed",
-                            "icon": "check_circle",
-                            "title": "Interview completed",
-                            "description": f"{session.get('user_name', 'User')} - Score: {score:.1f}/10",
-                            "time_ago": time_ago,
-                            "timestamp": completed_at
-                        })
+                            time_ago = f"{time_diff.seconds // 3600} hours ago"
+                    else:
+                        time_ago = f"{time_diff.days} days ago"
+
+                    score = session.get('overall_score', 0)
+                    activities.append({
+                        "type": "interview_completed",
+                        "icon": "check_circle",
+                        "title": "Interview completed",
+                        "description": f"{session.get('user_name', 'User')} - Score: {score:.1f}/10",
+                        "time_ago": time_ago,
+                        "timestamp": completed_date
+                    })
         except Exception as e:
             logger.warning(f"Error fetching recent sessions: {e}")
-        
+
         # Sort by timestamp (most recent first) and limit
-        activities.sort(key=lambda x: x['timestamp'], reverse=True)
+        activities.sort(key=lambda x: x['timestamp'] or now, reverse=True)
         activities = activities[:limit]
-        
+
+        for activity in activities:
+            ts = activity.get("timestamp")
+            if isinstance(ts, datetime):
+                activity["timestamp"] = ts.isoformat()
+
         return {
             "success": True,
             "activities": activities
         }
-        
+
     except Exception as e:
         logger.error(f"Error fetching recent activity: {e}")
         return {

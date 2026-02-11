@@ -7,10 +7,10 @@ import { createSpeechRecognizer } from '../../utils/azureSpeech';
 const FOR_TEST = false;
 
 // STT Provider: 'azure' for Azure Speech API, 'webspeech' for Web Speech API
-const STT_PROVIDER = 'webspeech'; // Options: 'azure' | 'webspeech'
+const STT_PROVIDER = 'azure'; // Options: 'azure' | 'webspeech'
 
 const InterviewScreen = () => {
-    const { interview, updateInterview, navigateTo, theme, toggleTheme, registerStopRecordingCallback, currentParams } = useInterview();
+    const { interview, updateInterview, navigateTo, theme, toggleTheme, registerStopRecordingCallback, currentParams, user } = useInterview();
     const [panelState, setPanelState] = useState('loading'); // 'loading', 'speaking', 'listening', 'evaluating', 'skipping', 'coach-feedback'
     const [transcript, setTranscript] = useState('');
     const [endingSession, setEndingSession] = useState(false);
@@ -58,9 +58,9 @@ const InterviewScreen = () => {
                         console.log('Interview started:', result);
                         updateInterview({
                             sessionId: result.session_id,
-                            userId: result.user_id || localStorage.getItem('user_id'),
-                            userEmail: result.user_email || localStorage.getItem('user_email'),
-                            userName: result.user_name || localStorage.getItem('user_name'),
+                            userId: result.user_id || user?.id || null,
+                            userEmail: result.user_email || user?.email || null,
+                            userName: result.user_name || user?.name || null,
                             role: currentParams.role,
                             experience: currentParams.level,
                             roleDescription,
