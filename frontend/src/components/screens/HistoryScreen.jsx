@@ -1,83 +1,10 @@
-<<<<<<< HEAD
-import React, { useState } from 'react';
-import { useInterview } from '../../context/InterviewContext';
-=======
 import React, { useState, useEffect } from 'react';
 import { useInterview } from '../../context/InterviewContext';
 import { historyApi } from '../../utils/api';
->>>>>>> two
 
 const HistoryScreen = () => {
     const { navigateTo, theme } = useInterview();
     const [expandedRow, setExpandedRow] = useState(null);
-<<<<<<< HEAD
-
-    // Dummy interview history data
-    const sessions = [
-        {
-            id: 1,
-            date: 'Oct 24, 2023',
-            time: '2:00 PM',
-            role: 'Frontend Developer',
-            icon: 'code',
-            color: 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400',
-            score: 92,
-            verdict: 'Excellent',
-            scoreColor: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
-            duration: '45m',
-        },
-        {
-            id: 2,
-            date: 'Oct 20, 2023',
-            time: '10:30 AM',
-            role: 'Backend Engineer',
-            icon: 'dns',
-            color: 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400',
-            score: 78,
-            verdict: 'Good',
-            scoreColor: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
-            duration: '30m',
-        },
-        {
-            id: 3,
-            date: 'Oct 15, 2023',
-            time: '4:15 PM',
-            role: 'Full Stack',
-            icon: 'layers',
-            color: 'bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400',
-            score: 65,
-            verdict: 'Average',
-            scoreColor: 'bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-300',
-            duration: '60m',
-        },
-        {
-            id: 4,
-            date: 'Oct 10, 2023',
-            time: '9:00 AM',
-            role: 'DevOps',
-            icon: 'cloud_circle',
-            color: 'bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400',
-            score: 88,
-            verdict: 'Great',
-            scoreColor: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
-            duration: '40m',
-        },
-        {
-            id: 5,
-            date: 'Oct 05, 2023',
-            time: '1:30 PM',
-            role: 'System Design',
-            icon: 'architecture',
-            color: 'bg-pink-100 dark:bg-pink-900/30 text-pink-600 dark:text-pink-400',
-            score: 70,
-            verdict: 'Good',
-            scoreColor: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
-            duration: '55m',
-        },
-    ];
-
-    const avgScore = Math.round(sessions.reduce((sum, s) => sum + s.score, 0) / sessions.length);
-=======
     const [sessions, setSessions] = useState([]);
     const [allSessions, setAllSessions] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -202,7 +129,6 @@ const HistoryScreen = () => {
     const avgScore = sessions.length > 0 
         ? Math.round((sessions.reduce((sum, s) => sum + s.score, 0) / sessions.length) * 10)
         : 0;
->>>>>>> two
 
     return (
         <div className="bg-background-light dark:bg-background-dark font-display h-full flex flex-col overflow-x-hidden transition-colors duration-300">
@@ -219,180 +145,6 @@ const HistoryScreen = () => {
                                 Review your past interview sessions, track your scores, and analyze performance reports.
                             </p>
                         </div>
-<<<<<<< HEAD
-                        <button className="flex items-center gap-2 px-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm font-semibold text-slate-700 dark:text-slate-200 shadow-sm hover:border-primary/50 transition-colors">
-                            <span className="material-symbols-outlined text-[20px] text-slate-400">
-                                calendar_month
-                            </span>
-                            Last 30 Days
-                            <span className="material-symbols-outlined text-[20px] text-slate-400">
-                                arrow_drop_down
-                            </span>
-                        </button>
-                    </div>
-
-                    {/* Stats Cards */}
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-6">
-                        {/* Total Sessions */}
-                        <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden group">
-                            <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                                <span className="material-symbols-outlined text-[80px] text-slate-400">
-                                    analytics
-                                </span>
-                            </div>
-                            <div className="flex flex-col gap-1 relative z-10">
-                                <p className="text-slate-500 dark:text-slate-400 text-sm font-semibold uppercase tracking-wider">
-                                    Total Sessions
-                                </p>
-                                <div className="flex items-baseline gap-2">
-                                    <h3 className="text-4xl font-black text-slate-900 dark:text-white">
-                                        {sessions.length}
-                                    </h3>
-                                    <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/30 px-2 py-0.5 rounded-full">
-                                        +2 this week
-                                    </span>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Average Score */}
-                        <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden group">
-                            <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                                <span className="material-symbols-outlined text-[80px] text-slate-400">
-                                    donut_large
-                                </span>
-                            </div>
-                            <div className="flex flex-col gap-1 relative z-10">
-                                <p className="text-slate-500 dark:text-slate-400 text-sm font-semibold uppercase tracking-wider">
-                                    Avg. Score
-                                </p>
-                                <div className="flex items-baseline gap-2">
-                                    <h3 className="text-4xl font-black text-slate-900 dark:text-white">
-                                        {avgScore}
-                                        <span className="text-2xl text-slate-400">%</span>
-                                    </h3>
-                                    <span className="text-xs font-bold text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded-full">
-                                        Steady
-                                    </span>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Focus Area */}
-                        <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden group">
-                            <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                                <span className="material-symbols-outlined text-[80px] text-slate-400">
-                                    target
-                                </span>
-                            </div>
-                            <div className="flex flex-col gap-1 relative z-10">
-                                <p className="text-slate-500 dark:text-slate-400 text-sm font-semibold uppercase tracking-wider">
-                                    Focus Area
-                                </p>
-                                <div className="flex items-baseline gap-2">
-                                    <h3 className="text-2xl font-black text-slate-900 dark:text-white truncate" title="System Design">
-                                        System Design
-                                    </h3>
-                                </div>
-                                <p className="text-xs text-slate-600 dark:text-slate-400 font-medium mt-1">
-                                    Recommended for next session
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Data Table Section */}
-                    <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl shadow-sm overflow-hidden flex flex-col">
-                        <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/50">
-                            <h3 className="font-bold text-slate-800 dark:text-slate-200">Recent Sessions</h3>
-                            <button className="text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white text-sm font-semibold flex items-center gap-1 transition-colors">
-                                View Analytics{' '}
-                                <span className="material-symbols-outlined text-[16px]">
-                                    arrow_forward
-                                </span>
-                            </button>
-                        </div>
-
-                        {/* Table */}
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-left border-collapse">
-                                <thead>
-                                    <tr className="border-b border-slate-200 dark:border-slate-700 bg-slate-50/30 dark:bg-slate-800/20">
-                                        <th className="px-6 py-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider w-[20%]">
-                                            Date
-                                        </th>
-                                        <th className="px-6 py-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider w-[25%]">
-                                            Job Role
-                                        </th>
-                                        <th className="px-6 py-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider w-[20%]">
-                                            Overall Score
-                                        </th>
-                                        <th className="px-6 py-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider w-[15%]">
-                                            Duration
-                                        </th>
-                                        <th className="px-6 py-4 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider w-[20%] text-right">
-                                            Actions
-                                        </th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-                                    {sessions.map((session) => (
-                                        <tr key={session.id} className="group hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-                                            <td className="px-6 py-4">
-                                                <div className="flex flex-col">
-                                                    <span className="text-sm font-semibold text-slate-900 dark:text-white">
-                                                        {session.date}
-                                                    </span>
-                                                    <span className="text-xs text-slate-500 dark:text-slate-400">
-                                                        {session.time}
-                                                    </span>
-                                                </div>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <div className="flex items-center gap-2">
-                                                    <div className={`p-1.5 rounded-lg ${session.color}`}>
-                                                        <span className="material-symbols-outlined text-[18px]">
-                                                            {session.icon}
-                                                        </span>
-                                                    </div>
-                                                    <span className="text-sm font-medium text-slate-700 dark:text-slate-200">
-                                                        {session.role}
-                                                    </span>
-                                                </div>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold ${session.scoreColor} border border-current border-opacity-20`}>
-                                                    <span className="size-1.5 rounded-full bg-current opacity-50"></span>
-                                                    {session.score}/100 ({session.verdict})
-                                                </span>
-                                            </td>
-                                            <td className="px-6 py-4 text-sm text-slate-500 dark:text-slate-400 flex items-center gap-1">
-                                                <span className="material-symbols-outlined text-[16px]">
-                                                    schedule
-                                                </span>
-                                                {session.duration}
-                                            </td>
-                                            <td className="px-6 py-4 text-right">
-                                                <button
-                                                    onClick={() => navigateTo('report')}
-                                                    className="inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 text-xs font-bold hover:bg-white dark:hover:bg-slate-700 transition-all shadow-sm"
-                                                >
-                                                    View Report
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-
-                        <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex justify-center">
-                            <button className="text-sm text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white font-semibold transition-colors">
-                                Load more history
-                            </button>
-                        </div>
-                    </div>
-=======
                         <div className="relative">
                             <button 
                                 onClick={() => setShowDropdown(!showDropdown)}
@@ -627,7 +379,6 @@ const HistoryScreen = () => {
                             </div>
                         </div>
                     )}
->>>>>>> two
                 </div>
             </main>
         </div>
@@ -635,3 +386,4 @@ const HistoryScreen = () => {
 };
 
 export default HistoryScreen;
+

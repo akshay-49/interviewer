@@ -191,23 +191,6 @@ export function playAudioFromBase64(base64Audio) {
             reject(error);
         }
     });
-<<<<<<< HEAD
-}
-
-// Stop any currently playing audio (base64 or Azure TTS)
-export function stopAudioPlayback() {
-    if (currentBase64Audio) {
-        try {
-            currentBase64Audio.pause();
-            currentBase64Audio.currentTime = 0;
-        } catch (e) {
-            console.warn('Error stopping base64 audio:', e);
-        }
-        currentBase64Audio = null;
-    }
-    stopSpeechPlayback();
-=======
->>>>>>> two
 }
 
 // Stop any currently playing audio (base64 or Azure TTS)

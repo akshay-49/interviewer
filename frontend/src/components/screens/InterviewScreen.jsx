@@ -10,11 +10,7 @@ const FOR_TEST = false;
 const STT_PROVIDER = 'azure'; // Options: 'azure' | 'webspeech'
 
 const InterviewScreen = () => {
-<<<<<<< HEAD
-    const { interview, updateInterview, navigateTo, theme, toggleTheme, registerStopRecordingCallback } = useInterview();
-=======
     const { interview, updateInterview, navigateTo, theme, toggleTheme, registerStopRecordingCallback, currentParams, user } = useInterview();
->>>>>>> two
     const [panelState, setPanelState] = useState('loading'); // 'loading', 'speaking', 'listening', 'evaluating', 'skipping', 'coach-feedback'
     const [transcript, setTranscript] = useState('');
     const [endingSession, setEndingSession] = useState(false);
@@ -47,57 +43,10 @@ const InterviewScreen = () => {
     const audioPlayedRef = useRef(false);
     const panelStateRef = useRef(panelState);
     const allowRecordingRef = useRef(false);
-<<<<<<< HEAD
-=======
-
-    const [isSpeakingQuestion, setIsSpeakingQuestion] = useState(false);
-    // Auto-start interview if role and level are provided via params
-    useEffect(() => {
-        if (currentParams?.role && currentParams?.level && !interview.sessionId) {
-            console.log('Auto-starting interview with role:', currentParams.role, 'level:', currentParams.level);
-            const startAutoInterview = async () => {
-                try {
-                    const roleDescription = currentParams.jobDescription || '';
-                    const persona = currentParams.persona || 'strict';
-                    const result = await api.startInterview(currentParams.role, currentParams.level, roleDescription, persona);
-                    if (result) {
-                        console.log('Interview started:', result);
-                        updateInterview({
-                            sessionId: result.session_id,
-                            userId: result.user_id || user?.id || null,
-                            userEmail: result.user_email || user?.email || null,
-                            userName: result.user_name || user?.name || null,
-                            role: currentParams.role,
-                            experience: currentParams.level,
-                            roleDescription,
-                            persona,
-                            questionNumber: 1,
-                            totalQuestions: result.total_questions || 5
-                        });
-                    }
-                } catch (error) {
-                    console.error('Failed to auto-start interview:', error);
-                    setPanelState('error');
-                }
-            };
-            startAutoInterview();
-        }
-    }, [currentParams?.role, currentParams?.level]);
->>>>>>> two
 
     // Speak question text when component mounts or when new question arrives
     useEffect(() => {
         if (interview.questionText && !interview.audioPlaying && !audioPlayedRef.current) {
-<<<<<<< HEAD
-            console.log('Starting to speak question:', interview.questionNumber);
-            audioPlayedRef.current = true;
-            updateInterview({ audioPlaying: true });
-            setPanelState('speaking');
-            
-            speakText(interview.questionText)
-                .then(() => {
-                    console.log('Question speech finished - now transitioning to listening');
-=======
             audioPlayedRef.current = true;
             updateInterview({ audioPlaying: true });
             setPanelState('speaking');
@@ -105,34 +54,16 @@ const InterviewScreen = () => {
 
             speakText(interview.questionText)
                 .then(() => {
->>>>>>> two
                     updateInterview({ audioPlaying: false, questionText: null });
                     allowRecordingRef.current = true;
                     // Question finished -> transition to listening (recording starts via panelState effect)
                     setPanelState('listening');
-<<<<<<< HEAD
-                    // Delay listening start by 1 second after question finishes
-                    setTimeout(() => startRecording(), 1000);
-=======
->>>>>>> two
                 })
                 .catch(() => {
                     updateInterview({ audioPlaying: false });
                     allowRecordingRef.current = true;
                     setPanelState('listening');
-<<<<<<< HEAD
-                    // Delay listening start by 1 second even on error
-                    setTimeout(() => startRecording(), 1000);
                 });
-        } else if (!interview.questionText && panelState === 'speaking' && !audioPlayedRef.current) {
-            // If no text to speak, go straight to listening with 1 second delay
-            console.log('No question to speak, starting recording after 1 second delay');
-            audioPlayedRef.current = true;
-            setPanelState('listening');
-            setTimeout(() => startRecording(), 1000);
-=======
-                });
->>>>>>> two
         }
     }, [interview.questionText]);
 
@@ -157,17 +88,11 @@ const InterviewScreen = () => {
         panelStateRef.current = panelState;
     }, [panelState]);
 
-<<<<<<< HEAD
-    // Stop recording any time we leave listening state
-    useEffect(() => {
-        if (panelState !== 'listening') {
-=======
     // Start/stop recording strictly based on listening state
     useEffect(() => {
         if (panelState === 'listening') {
             startRecording();
         } else {
->>>>>>> two
             stopAllRecording();
         }
     }, [panelState]);
@@ -182,69 +107,27 @@ const InterviewScreen = () => {
         return () => {
             console.log('InterviewScreen unmounting, stopping recording');
             stopAllRecording();
-<<<<<<< HEAD
-=======
         };
-    }, []);
-
-    // Stop recording when window loses focus or becomes hidden
-    useEffect(() => {
-        const handleVisibilityChange = () => {
-            if (document.hidden) {
-                console.log('Window hidden, stopping recording');
-                stopAllRecording();
-                allowRecordingRef.current = false;
-            }
->>>>>>> two
-        };
-
-        const handleBlur = () => {
-            console.log('Window lost focus, stopping recording');
-            stopAllRecording();
-            allowRecordingRef.current = false;
-        };
-
-        document.addEventListener('visibilitychange', handleVisibilityChange);
-        window.addEventListener('blur', handleBlur);
-
-        return () => {
-            document.removeEventListener('visibilitychange', handleVisibilityChange);
-            window.removeEventListener('blur', handleBlur);
-        };
-    }, []);
-
-    // Keep transcriptRef in sync with transcript state
-    useEffect(() => {
-        transcriptRef.current = transcript;
-    }, [transcript]);
+    }, [registerStopRecordingCallback]);
 
     const startRecording = () => {
-        console.log('startRecording called, isRecordingLocal:', isRecordingLocal, 'panelState:', panelState, 'recognitionRef:', recognitionRef.current);
-<<<<<<< HEAD
-=======
-
         if (panelStateRef.current !== 'listening') {
             console.log('Not in listening state, skipping startRecording');
             return;
         }
->>>>>>> two
-        
+
         // Prevent starting if already recording and recognition ref exists
         if (isRecordingLocal && recognitionRef.current) {
             console.log('Already recording, skipping');
             return;
         }
-        
+
         try {
             allowRecordingRef.current = true;
-<<<<<<< HEAD
-            const recognition = createSpeechRecognizer();
-=======
             // Use STT_PROVIDER to determine which speech recognition to use
             const forceWebSpeech = STT_PROVIDER === 'webspeech';
             const recognition = createSpeechRecognizer(forceWebSpeech);
->>>>>>> two
-            
+
             finalTranscriptRef.current = '';
             transcriptRef.current = '';
             setTranscript('');
@@ -302,15 +185,10 @@ const InterviewScreen = () => {
                 
                 setIsRecordingLocal(false);
 
-<<<<<<< HEAD
-                if (!allowRecordingRef.current) {
-                    updateInterview({ isRecording: false });
-=======
                 if (!allowRecordingRef.current || panelStateRef.current !== 'listening') {
                     console.log('Not restarting - allowRecording:', allowRecordingRef.current, 'panelState:', panelStateRef.current);
                     updateInterview({ isRecording: false });
                     recognitionRef.current = null;
->>>>>>> two
                     return;
                 }
                 
@@ -327,26 +205,12 @@ const InterviewScreen = () => {
                     recognitionRef.current = null;
                     submitAnswer(answerToSend);
                 } else {
-<<<<<<< HEAD
-                    // Recognition ended unexpectedly (silence, etc), restart it
-                    console.log('Recognition ended unexpectedly, restarting...');
-                    if (panelStateRef.current === 'listening') {
-                        // Need to reinitialize and restart since stopped object can't be restarted
-                        try {
-                            startRecording();
-                        } catch (error) {
-                            console.error('Failed to restart recognition:', error);
-                            updateInterview({ isRecording: false });
-                        }
-                    }
-=======
                     // Recognition ended unexpectedly (silence, etc)
                     // Do NOT automatically restart - let the user restart manually
                     console.log('Recognition ended unexpectedly, NOT auto-restarting');
                     updateInterview({ isRecording: false });
                     recognitionRef.current = null;
                     allowRecordingRef.current = false;
->>>>>>> two
                 }
             };
 
@@ -790,12 +654,6 @@ const InterviewScreen = () => {
                                 <span className="text-gray-400 dark:text-gray-500 text-xs font-semibold">
                                     {interview.roleDisplay || 'Technical'}
                                 </span>
-<<<<<<< HEAD
-                                <span className="text-gray-400 dark:text-gray-500 text-xs font-semibold">
-                                    {interview.roleDisplay || 'Technical'}
-                                </span>
-=======
->>>>>>> two
                             </div>
                             <div className="h-1 w-full bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
                                 <div className="h-full bg-primary rounded-full transition-all duration-500" style={{width: `${progressPercentage}%`}}></div>
@@ -807,11 +665,7 @@ const InterviewScreen = () => {
                             <h1 className="text-lg md:text-xl lg:text-2xl font-bold leading-snug tracking-tight text-gray-900 dark:text-gray-50 overflow-y-auto max-h-[300px] pr-2">
                                 {panelState === 'generating'
                                     ? (isLoadingResults ? 'Loading results...' : 'Generating next question...')
-<<<<<<< HEAD
-                                    : interview.currentQuestion}
-=======
                                     : (interview.currentQuestion || 'Loading question...')}
->>>>>>> two
                             </h1>
                             <p className="mt-3 text-gray-500 dark:text-gray-400 text-sm md:text-base leading-relaxed">
                                 {transcript || (panelState === 'listening' ? 'Start speaking...' : '')}
@@ -1151,3 +1005,4 @@ const EvaluatingPanel = () => (
 );
 
 export default InterviewScreen;
+

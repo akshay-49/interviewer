@@ -360,14 +360,9 @@ export async function speakText(text, voiceName = 'en-US-JennyNeural') {
             
             // Estimate audio duration: ~80ms per character (typical speech rate ~150 WPM = 2.5 words/sec)
             // Average word length is 5 chars, so: (text.length / 5 chars/word) / 2.5 words/sec * 1000 ms/sec = text.length * 80 ms
-<<<<<<< HEAD
-            const estimatedDurationMs = Math.max(text.length * 80, 200); // At least 200ms
-            console.log(`Estimated audio duration: ${estimatedDurationMs}ms for text length: ${text.length} chars`);
-=======
             // Add 500ms buffer to ensure audio finishes playing before transitioning
             const estimatedDurationMs = Math.max(text.length * 80, 1500); // At least 1.5 seconds to ensure audio plays
             console.log(`Estimated audio duration: ${estimatedDurationMs}ms for text length: ${text.length} chars, text: "${text.substring(0, 50)}..."`);
->>>>>>> two
             
             // Speak the text
             synthesizer.speakTextAsync(
@@ -375,13 +370,6 @@ export async function speakText(text, voiceName = 'en-US-JennyNeural') {
                 result => {
                     if (result.reason === SpeechSDK.ResultReason.SynthesizingAudioCompleted) {
                         audioPlaybackStarted = true;
-<<<<<<< HEAD
-                        console.log('Speech synthesis completed, waiting for audio playback...');
-                        
-                        // Wait for estimated audio duration to ensure audio has played
-                        setTimeout(() => {
-                            console.log('Audio playback complete, resolving');
-=======
                         console.log(`Speech synthesis completed, will wait ${estimatedDurationMs}ms before transitioning...`);
                         
                         // Wait for estimated audio duration to ensure audio has played
@@ -390,7 +378,6 @@ export async function speakText(text, voiceName = 'en-US-JennyNeural') {
                         setTimeout(() => {
                             const elapsedTime = Date.now() - startTime;
                             console.log(`Audio playback timeout complete after ${elapsedTime}ms, resolving`);
->>>>>>> two
                             synthesizer.close();
                             if (currentSynthesizer === synthesizer) {
                                 currentSynthesizer = null;
@@ -432,3 +419,4 @@ export function stopSpeechPlayback() {
         currentSynthesizer = null;
     }
 }
+

@@ -12,9 +12,6 @@ export const useInterview = () => {
 };
 
 export const InterviewProvider = ({ children }) => {
-<<<<<<< HEAD
-    const [currentScreen, setCurrentScreen] = useState('login');
-=======
     // Check if we're coming back from Microsoft redirect
     const getInitialScreen = () => {
         if (typeof window !== 'undefined') {
@@ -28,7 +25,6 @@ export const InterviewProvider = ({ children }) => {
     
     const [currentScreen, setCurrentScreen] = useState(getInitialScreen);
     const [currentParams, setCurrentParams] = useState(null);
->>>>>>> two
     const [backendAvailable, setBackendAvailable] = useState(false);
     const stopRecordingCallbackRef = useRef(null);
 
@@ -40,13 +36,6 @@ export const InterviewProvider = ({ children }) => {
     };
 
     const [theme, setTheme] = useState(getPreferredTheme);
-
-    // User state (for profile, login, etc.)
-    const [user, setUser] = useState({
-        name: 'Guest User',
-        email: null,
-        isLoggedIn: false,
-    });
 
     useEffect(() => {
         if (typeof window === 'undefined') return;
@@ -116,15 +105,10 @@ export const InterviewProvider = ({ children }) => {
     useEffect(() => {
         const handlePopState = (event) => {
             const screen = event.state?.screen || 'login';
-<<<<<<< HEAD
-            stopAudioPlayback();
-            setCurrentScreen(screen);
-=======
             const params = event.state?.params || null;
             stopAudioPlayback();
             setCurrentScreen(screen);
             setCurrentParams(params);
->>>>>>> two
         };
 
         window.addEventListener('popstate', handlePopState);
@@ -133,17 +117,10 @@ export const InterviewProvider = ({ children }) => {
 
     // Push state to history when currentScreen changes
     useEffect(() => {
-<<<<<<< HEAD
-        const state = { screen: currentScreen };
-        const title = currentScreen.charAt(0).toUpperCase() + currentScreen.slice(1);
-        window.history.pushState(state, title);
-    }, [currentScreen]);
-=======
         const state = { screen: currentScreen, params: currentParams };
         const title = currentScreen.charAt(0).toUpperCase() + currentScreen.slice(1);
         window.history.pushState(state, title);
     }, [currentScreen, currentParams]);
->>>>>>> two
 
     const updateInterview = (updates) => {
         setInterview(prev => ({ ...prev, ...updates }));
@@ -186,11 +163,7 @@ export const InterviewProvider = ({ children }) => {
         setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
     };
 
-<<<<<<< HEAD
-    const navigateTo = (screen, replaceHistory = false) => {
-=======
     const navigateTo = (screen, params = null, replaceHistory = false) => {
->>>>>>> two
         // Stop recording if we're leaving the interview screen
         if (screen !== 'interview' && stopRecordingCallbackRef.current) {
             console.log('Navigating away from interview, stopping recording');
@@ -200,14 +173,9 @@ export const InterviewProvider = ({ children }) => {
         stopAudioPlayback();
         
         setCurrentScreen(screen);
-<<<<<<< HEAD
-        
-        const state = { screen };
-=======
         setCurrentParams(params);
         
         const state = { screen, params };
->>>>>>> two
         const title = screen.charAt(0).toUpperCase() + screen.slice(1);
         
         if (replaceHistory) {
@@ -241,3 +209,4 @@ export const InterviewProvider = ({ children }) => {
         </InterviewContext.Provider>
     );
 };
+
