@@ -76,6 +76,8 @@ export const InterviewProvider = ({ children }) => {
         roleDisplay: '',
         persona: 'strict',
         experience: null,
+        recordingMode: 'audio',  // 'audio' or 'video'
+        inviteCode: null,
         currentQuestion: null,
         questionText: null,
         feedbackText: null,

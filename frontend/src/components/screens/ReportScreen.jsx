@@ -91,6 +91,7 @@ const ReportScreen = () => {
             }
             
             console.log('Session data loaded:', session);
+            console.log('Recording mode:', session.recording_mode || 'audio (default)');
             console.log('question_wise_feedback from API:', session.question_wise_feedback);
             console.log('question_wise_feedback length:', session.question_wise_feedback?.length);
             setSessionData(session);
@@ -296,20 +297,39 @@ const ReportScreen = () => {
                                                     {q.recordingUrl && (
                                                         <div className="mb-6 p-4 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg">
                                                             <div className="flex items-center gap-3 mb-3">
-                                                                <span className="material-symbols-outlined text-purple-600 dark:text-purple-400 text-xl">record_voice_over</span>
-                                                                <h4 className="text-sm font-bold text-purple-700 dark:text-purple-300 uppercase tracking-wider">Your Recording</h4>
+                                                                <span className="material-symbols-outlined text-purple-600 dark:text-purple-400 text-xl">
+                                                                    {sessionData.recording_mode === 'video' ? 'videocam' : 'record_voice_over'}
+                                                                </span>
+                                                                <h4 className="text-sm font-bold text-purple-700 dark:text-purple-300 uppercase tracking-wider">
+                                                                    Your {sessionData.recording_mode === 'video' ? 'Video' : 'Audio'} Recording
+                                                                </h4>
                                                             </div>
-                                                            <audio 
-                                                                controls 
-                                                                className="w-full h-10 rounded"
-                                                                style={{
-                                                                    accentColor: '#a855f7',
-                                                                }}
-                                                            >
-                                                                <source src={q.recordingUrl} type="audio/webm" />
-                                                                Your browser does not support the audio element.
-                                                            </audio>
-                                                            <p className="text-xs text-purple-600 dark:text-purple-400 mt-2">Click play to listen to your recorded answer</p>
+                                                            {sessionData.recording_mode === 'video' ? (
+                                                                <video 
+                                                                    controls 
+                                                                    className="w-full rounded bg-black"
+                                                                    style={{
+                                                                        maxHeight: '400px',
+                                                                    }}
+                                                                >
+                                                                    <source src={q.recordingUrl} type="video/webm" />
+                                                                    Your browser does not support the video element.
+                                                                </video>
+                                                            ) : (
+                                                                <audio 
+                                                                    controls 
+                                                                    className="w-full h-10 rounded"
+                                                                    style={{
+                                                                        accentColor: '#a855f7',
+                                                                    }}
+                                                                >
+                                                                    <source src={q.recordingUrl} type="audio/webm" />
+                                                                    Your browser does not support the audio element.
+                                                                </audio>
+                                                            )}
+                                                            <p className="text-xs text-purple-600 dark:text-purple-400 mt-2">
+                                                                Click play to {sessionData.recording_mode === 'video' ? 'watch' : 'listen to'} your recorded answer
+                                                            </p>
                                                         </div>
                                                     )}
 

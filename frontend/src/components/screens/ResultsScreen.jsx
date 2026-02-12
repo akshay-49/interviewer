@@ -49,6 +49,7 @@ const ResultsScreen = () => {
                 total_questions: interview.totalQuestions || 0,
                 answers: interview.answers || [],
                 question_wise_feedback: interview.questionWiseFeedback || [],
+                recording_mode: interview.recordingMode || 'audio',
                 started_at: interview.startedAt || now.toISOString(),
                 completed_at: now.toISOString(),
                 duration_seconds: durationSeconds

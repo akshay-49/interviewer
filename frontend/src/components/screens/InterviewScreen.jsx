@@ -33,6 +33,7 @@ const InterviewScreen = () => {
     const mediaRecorderRef = useRef(null);
     const mediaStreamRef = useRef(null);
     const audioChunksRef = useRef([]);
+    const recordingPreviewRef = useRef(null); // Video preview during recording
     // Speech recognition refs
     const recognitionRef = useRef(null);
     const finalTranscriptRef = useRef('');
@@ -94,6 +95,11 @@ const InterviewScreen = () => {
         if (mediaStreamRef.current) {
             mediaStreamRef.current.getTracks().forEach(track => track.stop());
             mediaStreamRef.current = null;
+        }
+        
+        // Cleanup video preview
+        if (recordingPreviewRef.current) {
+            recordingPreviewRef.current.srcObject = null;
         }
         
         audioChunksRef.current = [];
@@ -159,60 +165,151 @@ const InterviewScreen = () => {
 
         try {
             allowRecordingRef.current = true;
-            console.log('Requesting microphone access and starting recording + STT...');
+            console.log('Requesting media access and starting recording + STT...');
+            console.log('Recording mode:', interview.recordingMode);
             
-            // Request microphone access
-            const stream = await navigator.mediaDevices.getUserMedia({
+            // Request microphone (and camera if video mode)
+            const isVideoMode = interview.recordingMode === 'video';
+            const constraints = {
                 audio: {
                     echoCancellation: true,
                     noiseSuppression: true,
                     autoGainControl: true
                 }
-            });
+            };
+            
+            if (isVideoMode) {
+                // Use simple video constraints - just ask for any video
+                // Avoid strict constraints that might cause stream to stop
+                constraints.video = {
+                    facingMode: 'user'
+                };
+                console.log('Video mode: requesting camera and microphone with basic constraints');
+            } else {
+                console.log('Audio mode: requesting microphone only');
+            }
+            
+            let stream;
+            try {
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+                console.log(`✓ Media access granted (${isVideoMode ? 'video+audio' : 'audio only'})`);
+            } catch (error) {
+                console.error(`✗ Failed to get media stream:`, error.name, error.message);
+                if (isVideoMode && error.name === 'NotFoundError') {
+                    console.warn('[📹 VIDEO] Camera not found, falling back to audio only');
+                    // Fallback to audio only
+                    const audioConstraints = { audio: constraints.audio };
+                    stream = await navigator.mediaDevices.getUserMedia(audioConstraints);
+                    updateInterview({ recordingMode: 'audio' });
+                } else {
+                    throw error;
+                }
+            }
 
-            console.log('Microphone access granted');
+            console.log('Media access granted');
             mediaStreamRef.current = stream;
             audioChunksRef.current = [];
+            
+            // Monitor video track status in video mode
+            if (isVideoMode) {
+                const videoTrack = stream.getVideoTracks()[0];
+                const audioTrack = stream.getAudioTracks()[0];
+                
+                if (videoTrack) {
+                    console.log('[📹 VIDEO] Video track ready, label:', videoTrack.label, 'state:', videoTrack.readyState);
+                    
+                    videoTrack.onended = () => {
+                        console.warn('[📹 VIDEO] ⚠️ Video track ended unexpectedly!');
+                        setIsRecordingLocal(false);
+                        setPanelState('listening');
+                    };
+                    
+                    // Monitor track settings changes
+                    videoTrack.onmute = () => {
+                        console.warn('[📹 VIDEO] Video track muted');
+                    };
+                    videoTrack.onunmute = () => {
+                        console.log('[📹 VIDEO] Video track unmuted');
+                    };
+                }
+                
+                if (audioTrack) {
+                    console.log('[🎤 AUDIO] Audio track ready, label:', audioTrack.label, 'state:', audioTrack.readyState);
+                }
+            }
+            
+            // Attach video preview if in video mode
+            if (isVideoMode && recordingPreviewRef.current) {
+                recordingPreviewRef.current.srcObject = stream;
+                console.log('[📹 VIDEO] Preview stream attached');
+            }
             finalTranscriptRef.current = '';
             interimTranscriptRef.current = '';
 
             // ======================
-            // 1. START AUDIO RECORDING
+            // 1. START MEDIA RECORDING (AUDIO OR VIDEO)
             // ======================
-            let mimeType = 'audio/webm';
-            if (!MediaRecorder.isTypeSupported(mimeType)) {
-                console.warn('audio/webm not supported, falling back to audio/mp4');
-                mimeType = 'audio/mp4';
-            }
-            if (!MediaRecorder.isTypeSupported(mimeType)) {
-                console.warn('audio/mp4 not supported, using default');
-                mimeType = '';
+            let mimeType;
+            
+            if (isVideoMode) {
+                // Video mode: prefer webm with VP9 or VP8 + Opus
+                const videoMimeTypes = [
+                    'video/webm;codecs=vp9,opus',
+                    'video/webm;codecs=vp8,opus',
+                    'video/webm'
+                ];
+                
+                for (const type of videoMimeTypes) {
+                    if (MediaRecorder.isTypeSupported(type)) {
+                        mimeType = type;
+                        break;
+                    }
+                }
+                
+                if (!mimeType) {
+                    console.warn('No supported video MIME types, using default');
+                    mimeType = '';
+                }
+                console.log('Video recording MIME type:', mimeType || 'default');
+            } else {
+                // Audio mode: prefer webm with opus
+                mimeType = 'audio/webm';
+                if (!MediaRecorder.isTypeSupported(mimeType)) {
+                    console.warn('audio/webm not supported, falling back to audio/mp4');
+                    mimeType = 'audio/mp4';
+                }
+                if (!MediaRecorder.isTypeSupported(mimeType)) {
+                    console.warn('audio/mp4 not supported, using default');
+                    mimeType = '';
+                }
+                console.log('Audio recording MIME type:', mimeType || 'default');
             }
 
             const mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
-            console.log('MediaRecorder created with MIME type:', mimeType || 'default');
+            console.log('MediaRecorder created');
 
             mediaRecorder.ondataavailable = (event) => {
                 if (event.data.size > 0) {
                     audioChunksRef.current.push(event.data);
-                    console.log('Audio chunk received:', event.data.size);
+                    console.log(`${isVideoMode ? 'Video' : 'Audio'} chunk received:`, event.data.size);
                 }
             };
 
             mediaRecorder.onstop = () => {
-                console.log('Recording stopped, audio chunks:', audioChunksRef.current.length);
-                stream.getTracks().forEach(track => track.stop());
+                console.log(`${isVideoMode ? 'Video' : 'Audio'} recording stopped, chunks:`, audioChunksRef.current.length);
+                // Don't stop tracks here - let stopAllRecording handle cleanup
+                // This prevents the video preview from stopping prematurely
             };
 
             mediaRecorder.onerror = (event) => {
                 console.error('MediaRecorder error:', event.error);
-                stream.getTracks().forEach(track => track.stop());
+                // Don't stop tracks immediately - let error handler clean up properly
                 updateInterview({ isRecording: false });
                 setIsRecordingLocal(false);
             };
 
             mediaRecorderRef.current = mediaRecorder;
-            console.log('Starting audio recording...');
+            console.log(`Starting ${isVideoMode ? 'video' : 'audio'} recording...`);
             mediaRecorder.start();
 
             // Auto-stop after 30 seconds (max answer duration)
@@ -352,33 +449,36 @@ const InterviewScreen = () => {
             const transcriptToSend = (finalTranscriptRef.current + interimTranscriptRef.current).trim();
             console.log('Transcript to send:', transcriptToSend);
 
-            // Create audio blob from chunks (should have data by now!)
-            let audioBlob = null;
+            // Create media blob from chunks (audio or video depending on mode)
+            let mediaBlob = null;
             if (audioChunksRef.current.length > 0) {
-                audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-                console.log(`Audio blob created: ${audioBlob.size} bytes`);
+                // Determine MIME type based on recording mode
+                const mimeType = interview.recordingMode === 'video' ? 'video/webm' : 'audio/webm';
+                mediaBlob = new Blob(audioChunksRef.current, { type: mimeType });
+                const sizeKB = (mediaBlob.size / 1024).toFixed(2);
+                console.log(`[${interview.recordingMode === 'video' ? '📹 VIDEO' : '🎤 AUDIO'}] Blob created: ${sizeKB} KB (${mimeType})`);
             } else {
-                console.warn('No audio chunks collected');
+                console.warn('No media chunks collected');
             }
             
             audioChunksRef.current = [];
             setIsRecordingLocal(false);
 
-            // Upload recording to blob storage if we have audio
-            console.log('Uploading recording to blob storage...');
+            // Upload recording to blob storage if we have media
+            console.log(`[${interview.recordingMode === 'video' ? '📹 VIDEO' : '🎤 AUDIO'}] Uploading to blob storage...`);
             let recordingBlobUrl = null;
-            if (audioBlob && audioBlob.size > 0) {
+            if (mediaBlob && mediaBlob.size > 0) {
                 try {
-                    recordingBlobUrl = await api.uploadRecording(interview.sessionId, audioBlob, interview.questionNumber);
-                    console.log('Recording uploaded, blob URL:', recordingBlobUrl);
+                    recordingBlobUrl = await api.uploadRecording(interview.sessionId, mediaBlob, interview.questionNumber, interview.recordingMode);
+                    console.log(`[${interview.recordingMode === 'video' ? '📹 VIDEO' : '🎤 AUDIO'}] ✓ Uploaded successfully! Blob URL:`, recordingBlobUrl);
                 } catch (error) {
-                    console.error('Failed to upload recording:', error);
+                    console.error(`[${interview.recordingMode === 'video' ? '📹 VIDEO' : '🎤 AUDIO'}] ✗ Upload failed:`, error);
                     // Don't fail - proceed with transcript anyway
                 }
             }
 
             // Submit answer with BOTH transcript AND recording blob URL
-            console.log('Submitting answer with transcript + recording');
+            console.log(`[${interview.recordingMode === 'video' ? '📹 VIDEO' : '🎤 AUDIO'}] Submitting answer for Q${interview.questionNumber}`);
             submitAnswer(transcriptToSend, false, recordingBlobUrl);
         }
     };
@@ -907,7 +1007,13 @@ const InterviewScreen = () => {
                             <SpeakingPanel />
                         )}
                         {panelState === 'listening' && (
-                            <ListeningPanel onDone={handleDoneSpeaking} transcript={transcript} setTranscript={setTranscript} />
+                            <ListeningPanel 
+                                onDone={handleDoneSpeaking} 
+                                transcript={transcript} 
+                                setTranscript={setTranscript}
+                                recordingMode={interview.recordingMode}
+                                videoPreviewRef={recordingPreviewRef}
+                            />
                         )}
                         {panelState === 'evaluating' && (
                             <EvaluatingPanel />
@@ -1031,22 +1137,46 @@ const GeneratingPanel = ({ isLoadingResults }) => (
 );
 
 // Listening Panel Component
-const ListeningPanel = ({ onDone, transcript, setTranscript }) => (
+const ListeningPanel = ({ onDone, transcript, setTranscript, recordingMode = 'audio', videoPreviewRef = null }) => (
     <>
-        <div className="flex-1 flex flex-col items-center justify-center w-full">
-            <div aria-hidden="true" className="h-24 flex items-center justify-center gap-1.5 mb-3">
-                <div className="w-2 bg-[#2f86de]/80 dark:bg-[#2f86de]/90 rounded-full h-8 wave-bar animate-[wave_0.8s_ease-in-out_infinite]" style={{animationDelay: '0.1s'}}></div>
-                <div className="w-2 bg-[#2f86de]/80 dark:bg-[#2f86de]/90 rounded-full h-14 wave-bar animate-[wave_1.1s_ease-in-out_infinite]" style={{animationDelay: '0.2s'}}></div>
-                <div className="w-2 bg-[#2f86de]/80 dark:bg-[#2f86de]/90 rounded-full h-10 wave-bar animate-[wave_1.3s_ease-in-out_infinite]" style={{animationDelay: '0.3s'}}></div>
-                <div className="w-2 bg-[#2f86de]/80 dark:bg-[#2f86de]/90 rounded-full h-16 wave-bar animate-[wave_0.9s_ease-in-out_infinite]" style={{animationDelay: '0.1s'}}></div>
-                <div className="w-2 bg-[#2f86de]/80 dark:bg-[#2f86de]/90 rounded-full h-6 wave-bar animate-[wave_1.2s_ease-in-out_infinite]" style={{animationDelay: '0.4s'}}></div>
+        {recordingMode === 'video' && videoPreviewRef ? (
+            // Video mode: show video preview
+            <div className="flex-1 flex flex-col items-center justify-center w-full mb-4">
+                <div className="relative w-full max-w-sm">
+                    {/* Video Preview */}
+                    <video 
+                        ref={videoPreviewRef} 
+                        autoPlay 
+                        muted 
+                        className="w-full rounded-lg bg-black shadow-lg border-2 border-primary/50"
+                        style={{maxHeight: '300px'}}
+                    />
+                    {/* Recording Indicator Overlay */}
+                    <div className="absolute top-3 right-3 flex items-center gap-2 bg-red-600 text-white px-3 py-1.5 rounded-full shadow-lg animate-pulse">
+                        <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
+                        <span className="text-xs font-bold">REC</span>
+                    </div>
+                </div>
+                <p className="text-primary font-bold text-lg mt-4 animate-pulse">Recording Video...</p>
+                <p className="text-gray-400 dark:text-gray-500 text-sm mt-2">Speak clearly and look at the camera</p>
             </div>
-            <p className="text-primary font-bold text-lg md:text-xl animate-pulse">Listening...</p>
-            <p className="text-gray-400 dark:text-gray-500 text-sm md:text-base mt-2">Speak clearly</p>
-        </div>
+        ) : (
+            // Audio mode: show listening visualization
+            <div className="flex-1 flex flex-col items-center justify-center w-full">
+                <div aria-hidden="true" className="h-24 flex items-center justify-center gap-1.5 mb-3">
+                    <div className="w-2 bg-[#2f86de]/80 dark:bg-[#2f86de]/90 rounded-full h-8 wave-bar animate-[wave_0.8s_ease-in-out_infinite]" style={{animationDelay: '0.1s'}}></div>
+                    <div className="w-2 bg-[#2f86de]/80 dark:bg-[#2f86de]/90 rounded-full h-14 wave-bar animate-[wave_1.1s_ease-in-out_infinite]" style={{animationDelay: '0.2s'}}></div>
+                    <div className="w-2 bg-[#2f86de]/80 dark:bg-[#2f86de]/90 rounded-full h-10 wave-bar animate-[wave_1.3s_ease-in-out_infinite]" style={{animationDelay: '0.3s'}}></div>
+                    <div className="w-2 bg-[#2f86de]/80 dark:bg-[#2f86de]/90 rounded-full h-16 wave-bar animate-[wave_0.9s_ease-in-out_infinite]" style={{animationDelay: '0.1s'}}></div>
+                    <div className="w-2 bg-[#2f86de]/80 dark:bg-[#2f86de]/90 rounded-full h-6 wave-bar animate-[wave_1.2s_ease-in-out_infinite]" style={{animationDelay: '0.4s'}}></div>
+                </div>
+                <p className="text-primary font-bold text-lg md:text-xl animate-pulse">Listening...</p>
+                <p className="text-gray-400 dark:text-gray-500 text-sm md:text-base mt-2">Speak clearly</p>
+            </div>
+        )}
         
         <div className="w-full px-2 mb-2 text-xs text-gray-500 dark:text-gray-400 text-center italic">
-            Speak into your microphone
+            {recordingMode === 'video' ? 'Make sure your camera is visible' : 'Speak into your microphone'}
         </div>
         
         <div className="mt-auto pt-4 w-full flex flex-col items-center gap-2 relative z-20 pointer-events-auto">

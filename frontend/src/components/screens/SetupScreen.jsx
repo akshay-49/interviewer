@@ -158,8 +158,9 @@ const SetupScreen = () => {
             console.log('Resetting interview state...');
             resetInterview();
             
-            console.log('Calling backend API to start interview...');
-            const result = await api.startInterview(role, experience, formData.jobDescription, formData.persona === 'coach' ? 'coach' : 'strict');
+            console.log('Calling backend API to start interview with default mode...');
+            // Start with 'audio' mode by default, user will select mode on next screen
+            const result = await api.startInterview(role, experience, formData.jobDescription, formData.persona === 'coach' ? 'coach' : 'strict', 'audio');
 
             updateInterview({
                 sessionId: result.session_id,
@@ -180,8 +181,8 @@ const SetupScreen = () => {
                 startedAt: new Date().toISOString(),
             });
 
-            console.log('Interview started successfully!');
-            navigateTo('interview');
+            console.log('Interview session created, routing to mode selection...');
+            navigateTo('mode-selection');
         } catch (error) {
             console.error('Error starting interview:', error);
             alert('Failed to start interview. Please check backend connection.');

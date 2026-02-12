@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, File, UploadFile, WebSocket
+from fastapi import FastAPI, HTTPException, File, UploadFile, WebSocket, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict, List, Any
@@ -27,6 +27,7 @@ from backend.core.config import (
     MAX_SESSIONS
 )
 from backend.auth.routes import router as auth_router
+from backend.auth.auth0_utils import get_current_user_from_cookie
 from backend.interview.recording_routes import router as recording_router
 from backend.interview.history_routes import router as history_router
 from backend.core.cosmos import init_cosmos_db
@@ -145,6 +146,7 @@ class StartInterviewRequest(BaseModel):
     experience: str
     role_description: Optional[str] = None
     persona: Optional[str] = DEFAULT_PERSONA  # 'strict' or 'coach'
+    recording_mode: Optional[str] = 'audio'  # 'audio' or 'video'
 
 
 class AnswerRequest(BaseModel):
@@ -247,7 +249,8 @@ def start_interview(req: StartInterviewRequest):
             user_name=getattr(req, 'user_name', None),
             job_title=getattr(req, 'job_title', None),
             company_name=getattr(req, 'company_name', None),
-            total_questions=0  # Will be updated as questions are asked
+            total_questions=0,  # Will be updated as questions are asked
+            recording_mode=req.recording_mode  # Store recording mode
         )
     except Exception as e:
         logger.warning(f"Could not create Cosmos DB session: {e}")
@@ -683,6 +686,7 @@ class SaveSessionResultsRequest(BaseModel):
     total_questions: Optional[int] = None
     answers: Optional[List[Dict[str, Any]]] = None
     question_wise_feedback: List[Dict[str, Any]]  # All Q&A with evaluations
+    recording_mode: Optional[str] = 'audio'  # 'audio' or 'video'
     duration_seconds: Optional[int] = None
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
@@ -716,6 +720,7 @@ def save_session_results(req: SaveSessionResultsRequest):
             "total_questions": req.total_questions,
             "answers": req.answers or [],
             "question_wise_feedback": req.question_wise_feedback,
+            "recording_mode": req.recording_mode,
             "duration_seconds": req.duration_seconds,
             "started_at": req.started_at,
             "completed_at": req.completed_at or datetime.utcnow().isoformat(),
@@ -1009,6 +1014,7 @@ def send_invite(req: dict):
     role = req.get("role", "")
     seniority_level = req.get("seniorityLevel", "Senior")
     job_description = req.get("jobDescription", "")
+    recording_mode = req.get("recordingMode", "audio")  # 'audio' or 'video'
     
     if not candidate_name or not candidate_email:
         raise HTTPException(status_code=400, detail="Name and email are required")
@@ -1070,6 +1076,7 @@ def send_invite(req: dict):
             "role": role,
             "seniority_level": seniority_level,
             "job_description": job_description,
+            "recording_mode": recording_mode,  # 'audio' or 'video'
             "created_at": datetime.utcnow().isoformat(),
             "status": "sent",
             "interview_completed": False,
@@ -1143,6 +1150,49 @@ def send_invite(req: dict):
         raise HTTPException(status_code=500, detail=f"Failed to create invite: {str(e)}")
 
 
+@app.post("/admin/set-recording-mode")
+def set_recording_mode(req: dict, current_user = Depends(get_current_user_from_cookie)):
+    """Set recording mode (audio/video) for an invite"""
+    invite_code = req.get("invite_code")
+    recording_mode = req.get("recording_mode", "audio")  # 'audio' or 'video'
+    
+    if not invite_code or recording_mode not in ['audio', 'video']:
+        raise HTTPException(status_code=400, detail="Valid invite_code and recording_mode (audio/video) required")
+    
+    try:
+        from backend.core.cosmos import client
+        from azure.cosmos.partition_key import PartitionKey
+        
+        db = client.get_database_client("interviewer")
+        invites_container = db.get_container_client("invites")
+        
+        query = "SELECT * FROM invites WHERE invites.invite_code = @code"
+        items = list(invites_container.query_items(
+            query=query,
+            parameters=[{"name": "@code", "value": invite_code}],
+            max_item_count=1
+        ))
+        
+        if not items:
+            raise HTTPException(status_code=404, detail="Invite not found")
+        
+        invite = items[0]
+        invite["recording_mode"] = recording_mode
+        invites_container.replace_item(item=invite["id"], body=invite)
+        
+        logger.info(f"Recording mode set to {recording_mode} for invite {invite_code}")
+        
+        return {
+            "success": True,
+            "message": f"Recording mode set to {recording_mode}",
+            "invite_code": invite_code,
+            "recording_mode": recording_mode
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error setting recording mode: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to set recording mode: {str(e)}")
 
 
 @app.post("/admin/validate-invite")
@@ -1214,6 +1264,7 @@ def validate_invite(req: dict):
                 "seniority_level": invite.get("seniority_level"),
                 "role": invite.get("role"),
                 "job_description": invite.get("job_description"),
+                "recording_mode": invite.get("recording_mode", "audio"),
                 "invite_code": invite_code,
                 "user_exists": user_exists
             }

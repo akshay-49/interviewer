@@ -8,7 +8,8 @@ const InviteCandidateScreen = () => {
         email: '',
         role: '',
         seniorityLevel: '',
-        jobDescription: ''
+        jobDescription: '',
+        recordingMode: 'audio'
     });
     const [showSuccessToast, setShowSuccessToast] = useState(false);
     const [toastMessage, setToastMessage] = useState({ title: '', subtitle: '' });
@@ -94,7 +95,8 @@ const InviteCandidateScreen = () => {
                 email: '',
                 role: '',
                 seniorityLevel: '',
-                jobDescription: ''
+                jobDescription: '',
+                recordingMode: 'audio'
             });
             
             // Refetch invitations from database
@@ -225,6 +227,42 @@ const InviteCandidateScreen = () => {
                                 />
                             </div>
 
+                            {/* Recording Mode */}
+                            <div className="flex flex-col gap-2">
+                                <label className="text-sm font-bold text-[#0d191b]">Recording Mode</label>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <label className={`flex items-center justify-between gap-2 px-4 py-3 rounded-lg border ${formData.recordingMode === 'audio' ? 'border-primary bg-primary/5' : 'border-[#cfe4e7] bg-[#f8fbfc]'} cursor-pointer transition-all`}>
+                                        <div className="flex items-center gap-2">
+                                            <span className="material-symbols-outlined text-[20px] text-[#4c8e9a]">mic</span>
+                                            <span className="text-sm font-semibold text-[#0d191b]">Audio</span>
+                                        </div>
+                                        <input
+                                            type="radio"
+                                            name="recordingMode"
+                                            value="audio"
+                                            checked={formData.recordingMode === 'audio'}
+                                            onChange={handleInputChange}
+                                            className="accent-primary"
+                                        />
+                                    </label>
+                                    <label className={`flex items-center justify-between gap-2 px-4 py-3 rounded-lg border ${formData.recordingMode === 'video' ? 'border-primary bg-primary/5' : 'border-[#cfe4e7] bg-[#f8fbfc]'} cursor-pointer transition-all`}>
+                                        <div className="flex items-center gap-2">
+                                            <span className="material-symbols-outlined text-[20px] text-[#4c8e9a]">videocam</span>
+                                            <span className="text-sm font-semibold text-[#0d191b]">Video</span>
+                                        </div>
+                                        <input
+                                            type="radio"
+                                            name="recordingMode"
+                                            value="video"
+                                            checked={formData.recordingMode === 'video'}
+                                            onChange={handleInputChange}
+                                            className="accent-primary"
+                                        />
+                                    </label>
+                                </div>
+                                <p className="text-xs text-[#4c8e9a]">Select how the candidate will record their answers.</p>
+                            </div>
+
                             {/* Role / Position */}
                             <div className="flex flex-col gap-2">
                                 <label className="text-sm font-bold text-[#0d191b]">Role / Position</label>
@@ -315,6 +353,7 @@ const InviteCandidateScreen = () => {
                                         <tr className="bg-[#f8fbfc] text-[#4c8e9a] text-xs font-bold uppercase">
                                             <th className="px-6 py-4">Candidate</th>
                                             <th className="px-6 py-4">Role / Level</th>
+                                                            <th className="px-6 py-4">Interview Type</th>
                                             <th className="px-6 py-4">Date Sent</th>
                                             <th className="px-6 py-4">Status</th>
                                             <th className="px-6 py-4 text-center">Access</th>
@@ -358,6 +397,14 @@ const InviteCandidateScreen = () => {
                                                                 <span className="text-sm font-semibold">{invite.role || 'Candidate'}</span>
                                                                 <span className="text-[10px] text-[#4c8e9a] font-bold uppercase">{invite.seniority_level}</span>
                                                             </div>
+                                                        </td>
+                                                        <td className="px-6 py-4">
+                                                            <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-bold uppercase bg-[#e7f1f3] text-[#0d191b]">
+                                                                <span className="material-symbols-outlined text-[14px]">
+                                                                    {invite.recording_mode === 'video' ? 'videocam' : 'mic'}
+                                                                </span>
+                                                                {invite.recording_mode === 'video' ? 'Video Interview' : 'Audio Interview'}
+                                                            </span>
                                                         </td>
                                                         <td className="px-6 py-4">
                                                             <p className="text-sm">{formattedDate}</p>

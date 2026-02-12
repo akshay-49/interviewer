@@ -125,10 +125,14 @@ const InviteAcceptanceScreen = ({ inviteCode }) => {
                 {/* Interview Format Breakdown */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="flex flex-1 gap-4 rounded-xl border border-[#cfe4e7] bg-white p-5 flex-col shadow-sm hover:shadow-md transition-shadow">
-                        <span className="material-symbols-outlined text-primary text-3xl">mic</span>
+                        <span className="material-symbols-outlined text-primary text-3xl">
+                            {inviteData.recording_mode === 'video' ? 'videocam' : 'mic'}
+                        </span>
                         <div className="flex flex-col gap-1">
                             <h2 className="text-[#0d191b] text-base font-bold leading-tight">Type</h2>
-                            <p className="text-[#4c8e9a] text-sm font-normal leading-normal">Voice Interview</p>
+                            <p className="text-[#4c8e9a] text-sm font-normal leading-normal">
+                                {inviteData.recording_mode === 'video' ? 'Video Interview' : 'Audio Interview'}
+                            </p>
                         </div>
                     </div>
                     <div className="flex flex-1 gap-4 rounded-xl border border-[#cfe4e7] bg-white p-5 flex-col shadow-sm hover:shadow-md transition-shadow">
@@ -167,8 +171,14 @@ const InviteAcceptanceScreen = ({ inviteCode }) => {
                                 <span className="material-symbols-outlined text-lg">check_circle</span>
                             </div>
                             <div>
-                                <p className="text-[#0d191b] font-semibold">Microphone Access</p>
-                                <p className="text-gray-500 text-sm leading-relaxed">Ensure your browser has permission to access your microphone.</p>
+                                <p className="text-[#0d191b] font-semibold">
+                                    {inviteData.recording_mode === 'video' ? 'Camera & Microphone Access' : 'Microphone Access'}
+                                </p>
+                                <p className="text-gray-500 text-sm leading-relaxed">
+                                    {inviteData.recording_mode === 'video'
+                                        ? 'Ensure your browser has permission to access your camera and microphone.'
+                                        : 'Ensure your browser has permission to access your microphone.'}
+                                </p>
                             </div>
                         </div>
                         <div className="flex items-start gap-4">
@@ -190,11 +200,13 @@ const InviteAcceptanceScreen = ({ inviteCode }) => {
                             </div>
                         </div>
                     </div>
-                    <div className="bg-[#f0fdff] rounded-lg p-4 border-l-4 border-primary">
+                        <div className="bg-[#f0fdff] rounded-lg p-4 border-l-4 border-primary">
                         <div className="flex gap-3">
                             <span className="material-symbols-outlined text-primary">record_voice_over</span>
                             <p className="text-[#0d191b] text-sm italic">
-                                "This is a voice-first experience. You will be asked questions by our AI agent and you must answer by speaking aloud."
+                                {inviteData.recording_mode === 'video'
+                                    ? '"This is a video interview. You will be asked questions by our AI agent and must answer on camera with your microphone enabled."'
+                                    : '"This is an audio interview. You will be asked questions by our AI agent and must answer by speaking aloud."'}
                             </p>
                         </div>
                     </div>

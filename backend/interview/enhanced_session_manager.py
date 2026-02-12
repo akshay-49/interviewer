@@ -26,7 +26,8 @@ class SessionManager:
         user_name: Optional[str] = None,
         job_title: Optional[str] = None,
         company_name: Optional[str] = None,
-        total_questions: int = 0
+        total_questions: int = 0,
+        recording_mode: str = 'audio'
     ) -> str:
         """Create a new interview session"""
         session_id = str(uuid4())
@@ -39,6 +40,7 @@ class SessionManager:
             'job_title': job_title,
             'company_name': company_name,
             'total_questions': total_questions,
+            'recording_mode': recording_mode,
             'answers': [],
             'hints_used': 0,
             'questions_skipped': 0,

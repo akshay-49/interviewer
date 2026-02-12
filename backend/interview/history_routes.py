@@ -51,6 +51,7 @@ class SessionDetail(BaseModel):
     summary: Optional[dict]
     closing_audio_blob_url: Optional[str]
     question_wise_feedback: Optional[List[dict]]
+    recording_mode: Optional[str] = 'audio'  # Track if interview was audio or video
     started_at: datetime
     completed_at: Optional[datetime]
     duration_seconds: Optional[int]
@@ -162,6 +163,7 @@ async def get_session_details(
             summary=session.get('summary'),
             closing_audio_blob_url=session.get('closing_audio_blob_url'),
             question_wise_feedback=qwf,
+            recording_mode=session.get('recording_mode', 'audio'),
             started_at=session.get('started_at', datetime.utcnow()),
             completed_at=session.get('completed_at'),
             duration_seconds=session.get('duration_seconds'),
@@ -234,6 +236,7 @@ async def get_session_details_admin(
             summary=session.get('summary'),
             closing_audio_blob_url=session.get('closing_audio_blob_url'),
             question_wise_feedback=qwf,
+            recording_mode=session.get('recording_mode', 'audio'),
             started_at=session.get('started_at', datetime.utcnow()),
             completed_at=session.get('completed_at'),
             duration_seconds=session.get('duration_seconds'),
@@ -280,6 +283,7 @@ async def get_session_details_public(
             summary=session.get('summary'),
             closing_audio_blob_url=session.get('closing_audio_blob_url'),
             question_wise_feedback=qwf,
+            recording_mode=session.get('recording_mode', 'audio'),
             started_at=session.get('started_at', datetime.utcnow()),
             completed_at=session.get('completed_at'),
             duration_seconds=session.get('duration_seconds'),

@@ -6,6 +6,7 @@ import SignupScreen from './screens/SignupScreen';
 import ForgotPasswordScreen from './screens/ForgotPasswordScreen';
 import WelcomeScreen from './screens/WelcomeScreen';
 import SetupScreen from './screens/SetupScreen';
+import ModeSelectionScreen from './screens/ModeSelectionScreen';
 import InterviewScreen from './screens/InterviewScreen';
 import HistoryScreen from './screens/HistoryScreen';
 import ProfileScreen from './screens/ProfileScreen';
@@ -86,6 +87,8 @@ const ScreenManager = () => {
                 return <WelcomeScreen />;
             case 'setup':
                 return <SetupScreen />;
+            case 'mode-selection':
+                return <ModeSelectionScreen autoStart={currentParams?.autoStart} preselectedMode={currentParams?.recordingMode} />;
             case 'interview':
                 return <InterviewScreen />;
             case 'history':
@@ -137,7 +140,7 @@ const ScreenManager = () => {
 
     // Check if we're on an auth screen
     const isAuthScreen = ['login', 'signup', 'forgot-password', 'custom-login', 'callback'].includes(currentScreen);
-    const isAdminScreen = ['admin-dashboard', 'invite-candidate'].includes(currentScreen);
+    const isAdminScreen = ['admin-dashboard', 'invite-candidate', 'user-sessions'].includes(currentScreen);
     const isInviteScreen = currentScreen === 'invite-acceptance';
     const showProfileMenu = !['admin-login', 'admin-dashboard', 'invite-candidate'].includes(currentScreen);
 

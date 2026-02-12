@@ -344,7 +344,8 @@ def accept_invite(request: AcceptInviteRequest, auth0_user: dict = Depends(get_c
                 "full_name": user_name,
                 "is_admin": user_email.endswith("@accellor.com"),
                 "is_active": True
-            }
+            },
+            "recording_mode": invite.get("recording_mode", "audio")
         }
     except HTTPException:
         raise

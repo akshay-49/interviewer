@@ -113,6 +113,7 @@ const CallbackPage = () => {
                     const experience = invite.seniority_level || 'Mid-Level';
                     const roleDescription = invite.job_description || '';
                     const persona = 'strict';
+                    const recordingMode = invite.recording_mode || 'audio';
 
                     if (profile.id) {
                         try {
@@ -130,7 +131,7 @@ const CallbackPage = () => {
                     }
 
                     resetInterview();
-                    const result = await api.startInterview(role, experience, roleDescription, persona);
+                    const result = await api.startInterview(role, experience, roleDescription, persona, recordingMode);
 
                     updateInterview({
                         sessionId: result.session_id,
@@ -139,6 +140,8 @@ const CallbackPage = () => {
                         userName: result.user_name || profile.full_name || profile.email,
                         jobTitle: role,
                         companyName: '',
+                        recordingMode: recordingMode,
+                        inviteCode: inviteCode,
                         currentQuestion: result.question,
                         questionNumber: 1,
                         totalQuestions: result.total_questions || 5,

@@ -7,7 +7,7 @@ let currentBase64Audio = null;
 
 export const api = {
     // Start a new interview session
-    async startInterview(role, experience, roleDescription, persona = 'strict') {
+    async startInterview(role, experience, roleDescription, persona = 'strict', recordingMode = 'audio') {
         try {
             const response = await fetch(`${API_BASE_URL}/interview/start`, {
                 method: 'POST',
@@ -18,7 +18,8 @@ export const api = {
                     role,
                     experience,
                     role_description: roleDescription || '',
-                    persona
+                    persona,
+                    recording_mode: recordingMode
                 })
             });
             
@@ -145,13 +146,15 @@ export const api = {
     },
 
     // Upload audio recording to blob storage
-    async uploadRecording(sessionId, audioBlob, questionNumber = 0) {
+    async uploadRecording(sessionId, mediaBlob, questionNumber = 0, recordingMode = 'audio') {
         try {
             const formData = new FormData();
-            // Generate filename with question number and timestamp
+            // Generate descriptive filename with question number, mode, and timestamp
             const timestamp = Date.now();
-            const filename = `q${questionNumber}_answer_${timestamp}.webm`;
-            formData.append('file', audioBlob, filename);
+            const extension = 'webm';
+            // Format: q1_audio_1707123456.webm or q1_video_1707123456.webm
+            const filename = `q${questionNumber}_${recordingMode}_${timestamp}.${extension}`;
+            formData.append('file', mediaBlob, filename);
 
             const response = await fetch(`${API_BASE_URL}/recordings/upload?session_id=${sessionId}`, {
                 method: 'POST',
@@ -164,10 +167,10 @@ export const api = {
             }
 
             const data = await response.json();
-            console.log('Recording uploaded successfully:', data);
+            console.log(`[${recordingMode === 'video' ? '📹 VIDEO' : '🎤 AUDIO'}] Recording saved: ${filename}`, data);
             return data.recording?.url || null;
         } catch (error) {
-            console.error('Failed to upload recording:', error);
+            console.error(`Failed to upload ${recordingMode} recording:`, error);
             return null;
         }
     },
