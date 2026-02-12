@@ -1,9 +1,29 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { api } from '../utils/api';
 
 export const QAReviewCard = ({ feedback, index }) => {
     const [isExpanded, setIsExpanded] = useState(index === 0); // First card expanded by default
+    const [audioUrl, setAudioUrl] = useState(feedback?.recordingUrl || null);
+    const [loadingAudio, setLoadingAudio] = useState(false);
     
     if (!feedback) return null;
+
+    // Convert blob URL to SAS URL for secure playback
+    useEffect(() => {
+        if (feedback.recordingUrl && !feedback.recordingUrl.includes('?')) {
+            setLoadingAudio(true);
+            api.getBlobUrlWithSAS(feedback.recordingUrl)
+                .then(sasUrl => {
+                    setAudioUrl(sasUrl);
+                    console.log('✅ Audio URL converted to SAS URL');
+                })
+                .catch(error => {
+                    console.error('Failed to convert audio URL:', error);
+                    setAudioUrl(feedback.recordingUrl); // Fallback to original
+                })
+                .finally(() => setLoadingAudio(false));
+        }
+    }, [feedback.recordingUrl]);
 
     const scoreColor = feedback.score >= 7 ? 'bg-green-50 text-green-700 border-green-100' :
                        feedback.score >= 5 ? 'bg-amber-50 text-amber-700 border-amber-100' :
@@ -55,6 +75,28 @@ export const QAReviewCard = ({ feedback, index }) => {
                             {feedback.answer}
                         </p>
                     </div>
+
+                    {/* Recording Playback Section */}
+                    {audioUrl && (
+                        <div className="mb-6 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+                            <div className="flex items-center gap-3 mb-3">
+                                <span className="material-symbols-outlined text-purple-600 text-xl">record_voice_over</span>
+                                <h4 className="text-sm font-bold text-purple-700 uppercase tracking-wider">Your Recording</h4>
+                                {loadingAudio && <span className="text-xs text-purple-500">(preparing...)</span>}
+                            </div>
+                            <audio 
+                                controls 
+                                className="w-full h-10 rounded"
+                                style={{
+                                    accentColor: '#7c3aed',
+                                }}
+                            >
+                                <source src={audioUrl} type="audio/webm" />
+                                Your browser does not support the audio element.
+                            </audio>
+                            <p className="text-xs text-purple-600 mt-2">Click the button above to listen to your recorded answer</p>
+                        </div>
+                    )}
 
                     {/* Score Display */}
                     <div className="mb-6 p-4 bg-primary/5 rounded-lg border border-primary/10">

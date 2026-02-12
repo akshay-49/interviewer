@@ -61,7 +61,7 @@ export const api = {
     },
 
     // End interview session early
-    async endSession(sessionId) {
+    async endSession(sessionId, questionWiseFeedback = []) {
         try {
             const response = await fetch(`${API_BASE_URL}/interview/end`, {
                 method: 'POST',
@@ -69,7 +69,8 @@ export const api = {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    session_id: sessionId
+                    session_id: sessionId,
+                    question_wise_feedback: questionWiseFeedback
                 })
             });
             
@@ -141,6 +142,84 @@ export const api = {
             console.error('Health check failed:', error);
             return null;
         }
+    },
+
+    // Upload audio recording to blob storage
+    async uploadRecording(sessionId, audioBlob, questionNumber = 0) {
+        try {
+            const formData = new FormData();
+            // Generate filename with question number and timestamp
+            const timestamp = Date.now();
+            const filename = `q${questionNumber}_answer_${timestamp}.webm`;
+            formData.append('file', audioBlob, filename);
+
+            const response = await fetch(`${API_BASE_URL}/recordings/upload?session_id=${sessionId}`, {
+                method: 'POST',
+                body: formData,
+                credentials: 'include'  // Include httpOnly cookie for auth
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            console.log('Recording uploaded successfully:', data);
+            return data.recording?.url || null;
+        } catch (error) {
+            console.error('Failed to upload recording:', error);
+            return null;
+        }
+    },
+
+    // Convert a direct blob URL to SAS URL if needed for access
+    async getBlobUrlWithSAS(blobUrl) {
+        if (!blobUrl) return null;
+        
+        // If URL already has SAS token (has ?), return as-is
+        if (blobUrl.includes('?')) {
+            return blobUrl;
+        }
+        
+        try {
+            // Extract path components from URL
+            // Format: https://account.blob.core.windows.net/container/user_id/session_id/filename
+            const url = new URL(blobUrl);
+            const pathParts = url.pathname.split('/').filter(p => p);
+            
+            if (pathParts.length < 4) {
+                console.warn('Invalid blob URL format:', blobUrl);
+                return blobUrl;
+            }
+            
+            const container = pathParts[0];
+            const userId = pathParts[1];
+            const sessionId = pathParts[2];
+            const fileName = pathParts.slice(3).join('/');
+            
+            // Request SAS URL from backend
+            const sasResponse = await fetch(
+                `${API_BASE_URL}/recordings/sas-url?user_id=${encodeURIComponent(userId)}&session_id=${encodeURIComponent(sessionId)}&file_name=${encodeURIComponent(fileName)}`,
+                {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' },
+                    credentials: 'include'
+                }
+            );
+            
+            if (sasResponse.ok) {
+                const data = await sasResponse.json();
+                console.log('✅ Got SAS URL for blob playback');
+                return data.sas_url;
+            } else {
+                console.warn('Failed to get SAS URL, falling back to direct URL:', sasResponse.status);
+                return blobUrl;
+            }
+        } catch (error) {
+            console.error('Error converting blob URL to SAS URL:', error);
+            // Fallback to original URL - might fail but worth trying
+            return blobUrl;
+        }
     }
 };
 
@@ -205,6 +284,75 @@ export function stopAudioPlayback() {
         currentBase64Audio = null;
     }
     stopSpeechPlayback();
+}
+
+// Record audio using MediaRecorder API and return as blob
+export async function recordAudio(maxDuration = 30000) {
+    return new Promise(async (resolve, reject) => {
+        try {
+            // Request microphone access
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                }
+            });
+
+            const mediaRecorder = new MediaRecorder(stream, {
+                mimeType: 'audio/webm'
+            });
+            const audioChunks = [];
+
+            // Collect audio data
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    audioChunks.push(event.data);
+                }
+            };
+
+            // When recording stops, create blob and clean up
+            mediaRecorder.onstop = () => {
+                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                
+                // Stop all tracks to release microphone
+                stream.getTracks().forEach(track => track.stop());
+                
+                console.log(`Recording complete: ${audioBlob.size} bytes`);
+                resolve(audioBlob);
+            };
+
+            // Handle errors
+            mediaRecorder.onerror = (event) => {
+                stream.getTracks().forEach(track => track.stop());
+                reject(new Error(`MediaRecorder error: ${event.error}`));
+            };
+
+            // Start recording
+            console.log('Starting audio recording...');
+            mediaRecorder.start();
+
+            // Stop recording after max duration
+            const timeout = setTimeout(() => {
+                if (mediaRecorder.state === 'recording') {
+                    mediaRecorder.stop();
+                }
+            }, maxDuration);
+
+            // Store timeout ID for cleanup if needed
+            mediaRecorder._timeout = timeout;
+
+        } catch (error) {
+            console.error('Failed to start recording:', error);
+            if (error.name === 'NotAllowedError') {
+                reject(new Error('Microphone access denied. Please allow microphone access and try again.'));
+            } else if (error.name === 'NotFoundError') {
+                reject(new Error('No microphone found. Please check your audio device.'));
+            } else {
+                reject(error);
+            }
+        }
+    });
 }
 
 export const historyApi = {
@@ -349,6 +497,58 @@ export const historyApi = {
             return await response.json();
         } catch (error) {
             console.error('Failed to fetch session details:', error);
+            throw error;
+        }
+    },
+
+    // Get detailed session information (Admin access - can view any user's session)
+    async getSessionDetailsAdmin(sessionId) {
+        try {
+            const response = await fetch(`${API_BASE_URL}/history/admin/session/${sessionId}`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                credentials: 'include'  // Send httpOnly cookie
+            });
+            
+            if (!response.ok) {
+                if (response.status === 404) {
+                    throw new Error('Session not found');
+                }
+                if (response.status === 403) {
+                    throw new Error('Unauthorized - Admin access required');
+                }
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            return await response.json();
+        } catch (error) {
+            console.error('Failed to fetch admin session details:', error);
+            throw error;
+        }
+    },
+
+    // Get session details via public endpoint (no auth required, for expired sessions)
+    async getSessionDetailsPublic(sessionId) {
+        try {
+            const response = await fetch(`${API_BASE_URL}/history/session-public/${sessionId}`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            });
+            
+            if (!response.ok) {
+                if (response.status === 404) {
+                    throw new Error('Session not found');
+                }
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            return await response.json();
+        } catch (error) {
+            console.error('Failed to fetch public session details:', error);
             throw error;
         }
     },

@@ -1,8 +1,14 @@
 """Azure Blob Storage utilities for managing interview recordings"""
 import os
 import logging
+from pathlib import Path
+from dotenv import load_dotenv
 from azure.storage.blob import BlobServiceClient, BlobClient
 from datetime import datetime, timedelta
+
+# Load environment variables from .env file
+root_dir = Path(__file__).parent.parent.parent
+load_dotenv(root_dir / '.env')
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +166,7 @@ class BlobStorageManager:
             SAS URL or None
         """
         if not self.client:
+            logger.warning("❌ Blob client not available for SAS URL generation")
             return None
         
         try:
@@ -168,8 +175,10 @@ class BlobStorageManager:
             account_name = self.client.account_name
             account_key = os.getenv('AZURE_STORAGE_ACCOUNT_KEY')
             
+            logger.info(f"📝 SAS URL Generation: account_name={account_name}, has_key={bool(account_key)}")
+            
             if not account_key:
-                logger.warning("AZURE_STORAGE_ACCOUNT_KEY not set. Cannot generate SAS URL.")
+                logger.error("❌ AZURE_STORAGE_ACCOUNT_KEY environment variable not set!")
                 return None
             
             blob_path = f"{user_id}/{session_id}/{file_name}"
@@ -183,9 +192,12 @@ class BlobStorageManager:
                 expiry=datetime.utcnow() + timedelta(hours=expiry_hours)
             )
             
-            return f"https://{account_name}.blob.core.windows.net/{self.container_name}/{blob_path}?{sas_token}"
+            sas_url = f"https://{account_name}.blob.core.windows.net/{self.container_name}/{blob_path}?{sas_token}"
+            logger.info(f"✅ SAS URL generated successfully")
+            logger.debug(f"   SAS URL: {sas_url[:100]}...")  # Log first 100 chars for privacy
+            return sas_url
         except Exception as e:
-            logger.error(f"Failed to generate SAS URL: {e}")
+            logger.error(f"❌ Failed to generate SAS URL: {e}", exc_info=True)
             return None
 
 

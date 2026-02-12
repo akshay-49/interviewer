@@ -123,6 +123,12 @@ const ScreenManager = () => {
             // Also confirm for other screens to prevent accidental navigation
             resetInterview();
             navigateTo('welcome');
+        } else if (currentScreen === 'report' && currentParams?.isAdmin) {
+            // If viewing report from admin context, go back to admin dashboard
+            navigateTo('admin-dashboard');
+        } else if (currentScreen === 'user-sessions') {
+            // User sessions screen is also admin, go to admin dashboard
+            navigateTo('admin-dashboard');
         } else if (currentScreen !== 'login' && currentScreen !== 'signup' && currentScreen !== 'forgot-password') {
             // Already on welcome or other non-auth screen
             navigateTo('welcome');

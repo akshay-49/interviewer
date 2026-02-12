@@ -35,6 +35,7 @@ const ReportScreen = () => {
         try {
             setLoading(true);
             const sessionId = currentParams?.sessionId;
+            const isAdmin = currentParams?.isAdmin;
             
             if (!sessionId) {
                 setError('No session ID provided');
@@ -42,14 +43,61 @@ const ReportScreen = () => {
                 return;
             }
 
-            console.log('Loading session data for:', sessionId);
-            const session = await historyApi.getSessionDetails(sessionId);
+            console.log('Loading session data for:', sessionId, 'isAdmin:', isAdmin);
+            let session;
+            let lastError = null;
+            
+            try {
+                if (isAdmin) {
+                    // Use admin endpoint
+                    session = await historyApi.getSessionDetailsAdmin(sessionId);
+                } else {
+                    // Use regular endpoint (user's own sessions)
+                    session = await historyApi.getSessionDetails(sessionId);
+                }
+            } catch (err) {
+                lastError = err;
+                console.warn('First attempt failed:', err.message);
+                // If not admin and got auth error, try public endpoint as fallback
+                if (!isAdmin && err.message && err.message.includes('401')) {
+                    console.log('Auth failed on user endpoint, trying public endpoint...');
+                    try {
+                        session = await historyApi.getSessionDetailsPublic(sessionId);
+                        console.log('Public endpoint succeeded');
+                    } catch (publicErr) {
+                        console.error('Public fallback also failed:', publicErr);
+                        // Try admin endpoint as last resort
+                        try {
+                            session = await historyApi.getSessionDetailsAdmin(sessionId);
+                            console.log('Admin endpoint succeeded as last resort');
+                        } catch (adminErr) {
+                            console.error('All endpoints failed:', adminErr);
+                            throw lastError; // Throw original error
+                        }
+                    }
+                } else if (isAdmin) {
+                    // Admin endpoint failed, try public as fallback
+                    console.log('Admin endpoint failed, trying public endpoint...');
+                    try {
+                        session = await historyApi.getSessionDetailsPublic(sessionId);
+                        console.log('Public endpoint succeeded');
+                    } catch (publicErr) {
+                        console.error('Public fallback also failed:', publicErr);
+                        throw err;
+                    }
+                } else {
+                    throw err;
+                }
+            }
+            
             console.log('Session data loaded:', session);
+            console.log('question_wise_feedback from API:', session.question_wise_feedback);
+            console.log('question_wise_feedback length:', session.question_wise_feedback?.length);
             setSessionData(session);
             setError(null);
         } catch (err) {
             console.error('Failed to load session:', err);
-            setError(err.message);
+            setError(err.message || 'Failed to load session. Please try again.');
         } finally {
             setLoading(false);
         }
@@ -89,13 +137,28 @@ const ReportScreen = () => {
         return (
             <div className="bg-white dark:bg-slate-900 font-display h-full flex flex-col items-center justify-center">
                 <span className="material-symbols-outlined text-5xl text-red-500 mb-4">error</span>
-                <p className="text-red-600">{error || 'Failed to load session'}</p>
-                <button
-                    onClick={() => navigateTo('history')}
-                    className="mt-4 px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition-colors"
-                >
-                    Back to History
-                </button>
+                <p className="text-red-600 font-semibold mb-2">{error || 'Failed to load session'}</p>
+                <p className="text-gray-600 text-sm mb-6">
+                    {error?.includes('401') || error?.includes('Unauthorized') 
+                        ? 'Your session may have expired. Please log in again.'
+                        : ''}
+                </p>
+                <div className="flex gap-3">
+                    <button
+                        onClick={() => navigateTo('history')}
+                        className="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition-colors"
+                    >
+                        Back to History
+                    </button>
+                    {(error?.includes('401') || error?.includes('Unauthorized')) && (
+                        <button
+                            onClick={() => navigateTo('welcome')}
+                            className="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors"
+                        >
+                            Login Again
+                        </button>
+                    )}
+                </div>
             </div>
         );
     }
@@ -103,6 +166,11 @@ const ReportScreen = () => {
     const questions = sessionData.question_wise_feedback || [];
     const summary = sessionData.summary || {};
     const overallScore = sessionData.overall_score || 0;
+
+    // Debug logging
+    console.log('ReportScreen - questions.length:', questions.length);
+    console.log('ReportScreen - sessionData keys:', Object.keys(sessionData || {}));
+    console.log('ReportScreen - sessionData.question_wise_feedback:', sessionData?.question_wise_feedback);
 
     return (
         <div className="bg-white dark:bg-slate-900 font-display h-full flex flex-col overflow-hidden">
@@ -114,10 +182,10 @@ const ReportScreen = () => {
                         <div className="flex items-center justify-between mb-3">
                             <nav className="flex items-center text-sm text-gray-500 dark:text-gray-400 space-x-2">
                                 <button
-                                    onClick={() => navigateTo('history')}
+                                    onClick={() => currentParams?.isAdmin ? navigateTo('admin-dashboard') : navigateTo('history')}
                                     className="hover:text-slate-900 dark:hover:text-white transition-colors"
                                 >
-                                    History
+                                    {currentParams?.isAdmin ? 'Dashboard' : 'History'}
                                 </button>
                                 <span className="material-symbols-outlined text-[16px]">chevron_right</span>
                                 <span className="text-slate-600 dark:text-slate-300 font-medium">
@@ -125,7 +193,7 @@ const ReportScreen = () => {
                                 </span>
                             </nav>
                             <button
-                                onClick={() => navigateTo('history')}
+                                onClick={() => currentParams?.isAdmin ? navigateTo('admin-dashboard') : navigateTo('history')}
                                 className="p-2 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors"
                             >
                                 <span className="material-symbols-outlined">close</span>
@@ -223,6 +291,27 @@ const ReportScreen = () => {
                                                             {q.answer || 'No answer recorded'}
                                                         </p>
                                                     </div>
+
+                                                    {/* Recording Playback Section */}
+                                                    {q.recordingUrl && (
+                                                        <div className="mb-6 p-4 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg">
+                                                            <div className="flex items-center gap-3 mb-3">
+                                                                <span className="material-symbols-outlined text-purple-600 dark:text-purple-400 text-xl">record_voice_over</span>
+                                                                <h4 className="text-sm font-bold text-purple-700 dark:text-purple-300 uppercase tracking-wider">Your Recording</h4>
+                                                            </div>
+                                                            <audio 
+                                                                controls 
+                                                                className="w-full h-10 rounded"
+                                                                style={{
+                                                                    accentColor: '#a855f7',
+                                                                }}
+                                                            >
+                                                                <source src={q.recordingUrl} type="audio/webm" />
+                                                                Your browser does not support the audio element.
+                                                            </audio>
+                                                            <p className="text-xs text-purple-600 dark:text-purple-400 mt-2">Click play to listen to your recorded answer</p>
+                                                        </div>
+                                                    )}
 
                                                     {/* Score Display */}
                                                     <div className="mb-6 p-4 bg-slate-50 dark:bg-slate-700/50 rounded-lg border border-gray-200 dark:border-slate-600">

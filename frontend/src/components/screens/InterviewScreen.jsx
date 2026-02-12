@@ -1,13 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useInterview } from '../../context/InterviewContext';
-import { api, speakText, playAudioFromBase64 } from '../../utils/api';
+import { api, speakText, playAudioFromBase64, recordAudio } from '../../utils/api';
 import { createSpeechRecognizer } from '../../utils/azureSpeech';
-
-// Toggle test mode: set to true for testing with text input, false for production (mic only)
-const FOR_TEST = false;
-
-// STT Provider: 'azure' for Azure Speech API, 'webspeech' for Web Speech API
-const STT_PROVIDER = 'azure'; // Options: 'azure' | 'webspeech'
 
 const InterviewScreen = () => {
     const { interview, updateInterview, navigateTo, theme, toggleTheme, registerStopRecordingCallback, currentParams, user } = useInterview();
@@ -34,12 +28,15 @@ const InterviewScreen = () => {
         }
         return merged;
     };
-    const [isRecordingLocal, setIsRecordingLocal] = useState(false); // Local tracking for recognition state
+    const [isRecordingLocal, setIsRecordingLocal] = useState(false); // Local tracking for recording state
     const [isSubmitting, setIsSubmitting] = useState(false); // Prevent double-click on submit/skip/proceed
+    const mediaRecorderRef = useRef(null);
+    const mediaStreamRef = useRef(null);
+    const audioChunksRef = useRef([]);
+    // Speech recognition refs
     const recognitionRef = useRef(null);
     const finalTranscriptRef = useRef('');
-    const transcriptRef = useRef(''); // Store current transcript value for onend handler
-    const userStoppedRef = useRef(false);
+    const interimTranscriptRef = useRef('');
     const audioPlayedRef = useRef(false);
     const panelStateRef = useRef(panelState);
     const allowRecordingRef = useRef(false);
@@ -70,15 +67,36 @@ const InterviewScreen = () => {
     const stopAllRecording = () => {
         console.log('stopAllRecording called');
         allowRecordingRef.current = false;
+        
+        // Stop speech recognition
         if (recognitionRef.current) {
             try {
                 recognitionRef.current.stop();
-                console.log('Recognition stopped');
+                console.log('Speech recognition stopped');
             } catch (error) {
-                console.error('Error stopping recognition:', error);
+                console.error('Error stopping speech recognition:', error);
             }
             recognitionRef.current = null;
         }
+        
+        // Stop media recorder if active
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+            try {
+                mediaRecorderRef.current.stop();
+                console.log('MediaRecorder stopped');
+            } catch (error) {
+                console.error('Error stopping mediaRecorder:', error);
+            }
+            mediaRecorderRef.current = null;
+        }
+        
+        // Stop all audio tracks
+        if (mediaStreamRef.current) {
+            mediaStreamRef.current.getTracks().forEach(track => track.stop());
+            mediaStreamRef.current = null;
+        }
+        
+        audioChunksRef.current = [];
         setIsRecordingLocal(false);
         updateInterview({ isRecording: false });
     };
@@ -90,60 +108,134 @@ const InterviewScreen = () => {
 
     // Start/stop recording strictly based on listening state
     useEffect(() => {
-        if (panelState === 'listening') {
-            startRecording();
-        } else {
-            stopAllRecording();
-        }
+        let isMounted = true;
+        
+        const handleRecording = async () => {
+            if (panelState === 'listening') {
+                try {
+                    await startRecording();
+                } catch (error) {
+                    console.error('Error in startRecording:', error);
+                    // Don't change state here - let the UI handle the error
+                }
+            } else {
+                stopAllRecording();
+            }
+        };
+
+        handleRecording();
+
+        return () => {
+            isMounted = false;
+        };
     }, [panelState]);
 
     // Cleanup: stop recording when component unmounts
     useEffect(() => {
         // Register the callback to stop recording when navigating away
-        registerStopRecordingCallback(() => {
-            stopAllRecording();
-        });
+        if (registerStopRecordingCallback) {
+            registerStopRecordingCallback(() => {
+                stopAllRecording();
+            });
+        }
 
         return () => {
             console.log('InterviewScreen unmounting, stopping recording');
             stopAllRecording();
         };
-    }, [registerStopRecordingCallback]);
+    }, []); // Empty dependencies - run only on mount/unmount
 
-    const startRecording = () => {
+    const startRecording = async () => {
         if (panelStateRef.current !== 'listening') {
             console.log('Not in listening state, skipping startRecording');
             return;
         }
 
-        // Prevent starting if already recording and recognition ref exists
-        if (isRecordingLocal && recognitionRef.current) {
+        // Prevent starting if already recording
+        if (isRecordingLocal && mediaRecorderRef.current) {
             console.log('Already recording, skipping');
             return;
         }
 
         try {
             allowRecordingRef.current = true;
-            // Use STT_PROVIDER to determine which speech recognition to use
-            const forceWebSpeech = STT_PROVIDER === 'webspeech';
-            const recognition = createSpeechRecognizer(forceWebSpeech);
+            console.log('Requesting microphone access and starting recording + STT...');
+            
+            // Request microphone access
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                }
+            });
 
+            console.log('Microphone access granted');
+            mediaStreamRef.current = stream;
+            audioChunksRef.current = [];
             finalTranscriptRef.current = '';
-            transcriptRef.current = '';
-            setTranscript('');
-            userStoppedRef.current = false;
+            interimTranscriptRef.current = '';
 
+            // ======================
+            // 1. START AUDIO RECORDING
+            // ======================
+            let mimeType = 'audio/webm';
+            if (!MediaRecorder.isTypeSupported(mimeType)) {
+                console.warn('audio/webm not supported, falling back to audio/mp4');
+                mimeType = 'audio/mp4';
+            }
+            if (!MediaRecorder.isTypeSupported(mimeType)) {
+                console.warn('audio/mp4 not supported, using default');
+                mimeType = '';
+            }
+
+            const mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+            console.log('MediaRecorder created with MIME type:', mimeType || 'default');
+
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    audioChunksRef.current.push(event.data);
+                    console.log('Audio chunk received:', event.data.size);
+                }
+            };
+
+            mediaRecorder.onstop = () => {
+                console.log('Recording stopped, audio chunks:', audioChunksRef.current.length);
+                stream.getTracks().forEach(track => track.stop());
+            };
+
+            mediaRecorder.onerror = (event) => {
+                console.error('MediaRecorder error:', event.error);
+                stream.getTracks().forEach(track => track.stop());
+                updateInterview({ isRecording: false });
+                setIsRecordingLocal(false);
+            };
+
+            mediaRecorderRef.current = mediaRecorder;
+            console.log('Starting audio recording...');
+            mediaRecorder.start();
+
+            // Auto-stop after 30 seconds (max answer duration)
+            setTimeout(() => {
+                if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+                    console.log('Auto-stopping recording after 30s timeout');
+                    mediaRecorderRef.current.stop();
+                }
+            }, 30000);
+
+            // ======================
+            // 2. START SPEECH RECOGNITION (STT)
+            // ======================
+            const recognition = createSpeechRecognizer(false); // Use Azure Speech API (false = Azure)
+            
             recognition.onstart = () => {
                 console.log('Speech recognition started');
                 setIsRecordingLocal(true);
                 updateInterview({ isRecording: true });
-                // Don't set panelState here - it should already be 'speaking' from the effect
-                // It will transition to 'listening' when we manually set it
-                // This prevents premature 'listening' state from showing
             };
 
             recognition.onresult = (event) => {
-                let interimTranscript = '';
+                let interim = '';
                 
                 for (let i = event.resultIndex; i < event.results.length; i++) {
                     const result = event.results[i];
@@ -153,101 +245,142 @@ const InterviewScreen = () => {
                     if (isFinal) {
                         finalTranscriptRef.current += transcriptPiece + ' ';
                     } else {
-                        interimTranscript += transcriptPiece;
+                        interim += transcriptPiece;
                     }
                 }
                 
-                const updatedTranscript = finalTranscriptRef.current + interimTranscript;
-                transcriptRef.current = updatedTranscript;
-                setTranscript(updatedTranscript);
+                const combined = finalTranscriptRef.current + interim;
+                interimTranscriptRef.current = interim;
+                setTranscript(combined);
+                console.log('Transcript updated:', combined);
             };
 
             recognition.onerror = (event) => {
                 console.error('Speech recognition error:', event.error);
-                if (event.error === 'not-allowed' || event.error.includes('not-allowed')) {
-                    alert('Microphone access denied. Please allow microphone access and refresh the page.');
-                } else if (event.error === 'network' || event.error.includes('network')) {
-                    alert('Network error. Please check your internet connection and try again.');
-                } else {
-                    console.warn('Speech recognition error:', event.error);
-                    // Don't show alert for other errors, just log them
+                if (event.error === 'not-allowed') {
+                    alert('Microphone access denied for speech recognition.');
+                } else if (event.error === 'network') {
+                    alert('Network error in speech recognition. Check your connection.');
                 }
-                updateInterview({ isRecording: false });
-                // Don't change panel state - stay where we were
             };
 
-
             recognition.onend = () => {
-                console.log('Speech recognition ended, userStopped:', userStoppedRef.current);
-                console.log('Final transcript ref:', finalTranscriptRef.current);
-                console.log('Transcript ref:', transcriptRef.current);
-                console.log('Panel state:', panelStateRef.current);
-                
-                setIsRecordingLocal(false);
-
-                if (!allowRecordingRef.current || panelStateRef.current !== 'listening') {
-                    console.log('Not restarting - allowRecording:', allowRecordingRef.current, 'panelState:', panelStateRef.current);
-                    updateInterview({ isRecording: false });
-                    recognitionRef.current = null;
-                    return;
-                }
-                
-                // Only submit if user manually stopped (legacy path)
-                if (userStoppedRef.current) {
-                    allowRecordingRef.current = false;
-                    updateInterview({ isRecording: false });
-                    const answerToSend = finalTranscriptRef.current.trim() || transcriptRef.current.trim();
-                    console.log('Submitting answer:', answerToSend);
-
-                    // Reset the flag after submission
-                    userStoppedRef.current = false;
-                    // Clear the ref so we know to reinitialize
-                    recognitionRef.current = null;
-                    submitAnswer(answerToSend);
-                } else {
-                    // Recognition ended unexpectedly (silence, etc)
-                    // Do NOT automatically restart - let the user restart manually
-                    console.log('Recognition ended unexpectedly, NOT auto-restarting');
-                    updateInterview({ isRecording: false });
-                    recognitionRef.current = null;
-                    allowRecordingRef.current = false;
-                }
+                console.log('Speech recognition ended');
+                console.log('Final transcript:', finalTranscriptRef.current);
             };
 
             recognitionRef.current = recognition;
-            
             console.log('Starting speech recognition...');
             recognition.start();
+
         } catch (error) {
-            console.error('Error starting recognition:', error);
-            alert('Failed to start speech recognition: ' + error.message);
+            console.error('Error starting recording/STT:', error);
+            console.error('Error name:', error.name);
+            console.error('Error message:', error.message);
+            
+            setIsRecordingLocal(false);
             updateInterview({ isRecording: false });
+            
+            if (error.name === 'NotAllowedError') {
+                alert('Microphone access denied. Please allow microphone access in your browser settings and try again.');
+            } else if (error.name === 'NotFoundError') {
+                alert('No microphone found. Please check your audio device is connected.');
+            } else if (error.name === 'NotReadableError') {
+                alert('Microphone is already in use by another application. Please close other apps and try again.');
+            } else {
+                alert('Failed to start recording/STT: ' + error.message);
+            }
         }
     };
 
-    const handleDoneSpeaking = () => {
-        console.log('User clicked Done Speaking, about to submit');
-        console.log('Current panelState:', panelState);
-        console.log('Recognition ref:', recognitionRef.current);
+    const handleDoneSpeaking = async () => {
+        console.log('User clicked Done Speaking, stopping recording/STT and uploading');
         allowRecordingRef.current = false;
-        userStoppedRef.current = false; // prevent onend auto-submit
-        // Stop recognition immediately
+
+        // Stop speech recognition (synchronous)
         if (recognitionRef.current) {
-            console.log('Stopping recognition...');
             try {
                 recognitionRef.current.stop();
+                console.log('Speech recognition stopped');
             } catch (err) {
-                console.error('Error stopping recognition:', err);
+                console.error('Error stopping speech recognition:', err);
             }
-        } else {
-            console.warn('Recognition ref not available!');
+            recognitionRef.current = null;
         }
-        // Clear recognition ref so it won't restart
-        recognitionRef.current = null;
-        // Submit answer directly
-        const answerToSend = finalTranscriptRef.current.trim() || transcriptRef.current.trim();
-        console.log('Submitting answer (direct):', answerToSend);
-        submitAnswer(answerToSend);
+
+        // Stop media recorder and WAIT for it to finish collecting audio chunks
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+            const mediaRecorder = mediaRecorderRef.current;
+            
+            // Wait for the 'stop' event which fires after all chunks are collected
+            return new Promise((resolve) => {
+                const onStopHandler = async () => {
+                    mediaRecorder.removeEventListener('stop', onStopHandler);
+                    console.log(`MediaRecorder stopped, collected ${audioChunksRef.current.length} chunks`);
+                    
+                    // Now proceed with the submission (chunks are ready)
+                    await proceedWithSubmission();
+                    resolve();
+                };
+                
+                mediaRecorder.addEventListener('stop', onStopHandler);
+                
+                try {
+                    console.log('Stopping MediaRecorder...');
+                    mediaRecorder.stop();
+                } catch (err) {
+                    console.error('Error stopping mediaRecorder:', err);
+                    // Run handler anyway to proceed
+                    onStopHandler();
+                }
+            });
+        } else {
+            // Not recording, proceed immediately
+            await proceedWithSubmission();
+        }
+
+        async function proceedWithSubmission() {
+            // Stop all audio tracks
+            if (mediaStreamRef.current) {
+                mediaStreamRef.current.getTracks().forEach(track => track.stop());
+                mediaStreamRef.current = null;
+            }
+
+            mediaRecorderRef.current = null;
+
+            // Get transcript from STT
+            const transcriptToSend = (finalTranscriptRef.current + interimTranscriptRef.current).trim();
+            console.log('Transcript to send:', transcriptToSend);
+
+            // Create audio blob from chunks (should have data by now!)
+            let audioBlob = null;
+            if (audioChunksRef.current.length > 0) {
+                audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+                console.log(`Audio blob created: ${audioBlob.size} bytes`);
+            } else {
+                console.warn('No audio chunks collected');
+            }
+            
+            audioChunksRef.current = [];
+            setIsRecordingLocal(false);
+
+            // Upload recording to blob storage if we have audio
+            console.log('Uploading recording to blob storage...');
+            let recordingBlobUrl = null;
+            if (audioBlob && audioBlob.size > 0) {
+                try {
+                    recordingBlobUrl = await api.uploadRecording(interview.sessionId, audioBlob, interview.questionNumber);
+                    console.log('Recording uploaded, blob URL:', recordingBlobUrl);
+                } catch (error) {
+                    console.error('Failed to upload recording:', error);
+                    // Don't fail - proceed with transcript anyway
+                }
+            }
+
+            // Submit answer with BOTH transcript AND recording blob URL
+            console.log('Submitting answer with transcript + recording');
+            submitAnswer(transcriptToSend, false, recordingBlobUrl);
+        }
     };
 
     const handleGetHint = async () => {
@@ -269,10 +402,6 @@ const InterviewScreen = () => {
                         await speakText(result.hint);
                     }
                 }
-                // Ensure recognition is still active after hint audio finishes
-                if (recognitionRef.current && panelState === 'listening') {
-                    console.log('Hint audio finished, recognition still active');
-                }
             } else if (result.hint) {
                 await speakText(result.hint);
             }
@@ -284,13 +413,13 @@ const InterviewScreen = () => {
         }
     };
 
-    const submitAnswer = async (answerText, isSkip = false) => {
+    const submitAnswer = async (answerText, isSkip = false, recordingBlobUrl = null) => {
         if (isSubmitting) {
             console.log('Already submitting, ignoring click');
             return;
         }
         
-        console.log('Submitting answer:', answerText, 'isSkip:', isSkip);
+        console.log('Submitting answer:', answerText, 'isSkip:', isSkip, 'recordingBlobUrl:', recordingBlobUrl);
         setIsSubmitting(true);
         
         // Check if this is the last question (max 5 questions)
@@ -308,7 +437,7 @@ const InterviewScreen = () => {
         setTranscript('');
 
         try {
-            const result = await api.submitAnswer(interview.sessionId, answerText, isSkip);
+            const result = await api.submitAnswer(interview.sessionId, answerText, isSkip, recordingBlobUrl);
             console.log('Answer submitted, response:', result);
 
             // Store the answer
@@ -326,12 +455,17 @@ const InterviewScreen = () => {
                 topic: result.evaluation.topic,
                 strengths: result.evaluation.strengths || [],
                 weaknesses: result.evaluation.weaknesses || [],
-                feedback: result.feedback || ''
+                feedback: result.feedback || '',
+                recordingUrl: recordingBlobUrl  // Track recording for this question
             } : null;
 
+            let currentFeedback = questionWiseFeedback;
             if (feedbackEntry) {
                 console.log('Captured evaluation data:', feedbackEntry);
-                syncQuestionWiseFeedback(feedbackEntry);
+                console.log('syncQuestionWiseFeedback called with feedbackEntry');
+                currentFeedback = syncQuestionWiseFeedback(feedbackEntry);
+                console.log('After syncQuestionWiseFeedback, currentFeedback length:', currentFeedback?.length);
+                console.log('After syncQuestionWiseFeedback, currentFeedback content:', currentFeedback);
             }
 
             if (!result.final && result.step === 'feedback') {
@@ -372,21 +506,38 @@ const InterviewScreen = () => {
                 audioPlayedRef.current = false; // Reset for next question
                 setHint(null); // Clear hint for next question
                 
-                // Reset transcripts and refs for new question
+                // Reset audio chunks and transcript refs for new question
+                audioChunksRef.current = [];
                 finalTranscriptRef.current = '';
-                transcriptRef.current = '';
-                userStoppedRef.current = false;
+                interimTranscriptRef.current = '';
                 allowRecordingRef.current = false; // Disable recording until speech finishes
                 setTranscript('');
-                // Clear recognition so it will be reinitialized when listening starts
+                
+                // Stop speech recognition
                 if (recognitionRef.current) {
                     try {
                         recognitionRef.current.stop();
                     } catch (e) {
-                        console.log('Recognition already stopped');
+                        console.log('Speech recognition already stopped');
+                    }
+                    recognitionRef.current = null;
+                }
+                
+                // Stop media recorder and cleanup audio
+                if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+                    try {
+                        mediaRecorderRef.current.stop();
+                    } catch (e) {
+                        console.log('MediaRecorder already stopped');
                     }
                 }
-                recognitionRef.current = null;
+                mediaRecorderRef.current = null;
+                
+                if (mediaStreamRef.current) {
+                    mediaStreamRef.current.getTracks().forEach(track => track.stop());
+                    mediaStreamRef.current = null;
+                }
+                
                 updateInterview({
                     currentQuestion: result.question,
                     questionText: result.question,
@@ -399,24 +550,16 @@ const InterviewScreen = () => {
                 // Interview complete
                 console.log('Interview complete');
                 console.log('Result:', JSON.stringify(result, null, 2));
-                console.log('Local questionWiseFeedback state:', questionWiseFeedback);
-                
-                // Capture evaluation for the LAST question if it exists
-                const finalFeedback = feedbackEntry
-                    ? mergeFeedback(questionWiseFeedback, feedbackEntry)
-                    : [...questionWiseFeedback];
-                if (feedbackEntry) {
-                    console.log('Final feedback with last question:', finalFeedback);
-                }
-                
-                console.log('questionWiseFeedback:', finalFeedback);
+                console.log('Final feedback state at completion:', currentFeedback);
+                console.log('currentFeedback length at completion:', currentFeedback?.length);
                 console.log('hintsUsed:', interview.hintsUsed);
                 console.log('questionsSkipped:', interview.questionsSkipped);
                 updateInterview({ 
                     summary: result.summary, 
                     answers: updatedAnswers,
-                    questionWiseFeedback: finalFeedback,
+                    questionWiseFeedback: currentFeedback,
                 });
+                console.log('Updated interview context with questionWiseFeedback, array length:', currentFeedback?.length);
                 navigateTo('results');
             }
         } catch (error) {
@@ -442,7 +585,6 @@ const InterviewScreen = () => {
             console.log('Proceeded after feedback, response:', result);
             // Reset refs BEFORE updating state to ensure effect triggers correctly
             audioPlayedRef.current = false;
-            userStoppedRef.current = false;
             setHint(null); // Clear hint for next question
             updateInterview({
                 feedbackText: null,
@@ -462,7 +604,6 @@ const InterviewScreen = () => {
 
     const tryAgainSameQuestion = () => {
         // Replay same question and re-enter listening with typing/mic
-        userStoppedRef.current = false;
         audioPlayedRef.current = false;
         const questionToSpeak = interview.currentQuestion;
 
@@ -501,14 +642,26 @@ const InterviewScreen = () => {
         }
         
         console.log('Skipping question');
-        // Stop recording if active
+        
+        // Stop speech recognition
         if (recognitionRef.current) {
             recognitionRef.current.stop();
+            recognitionRef.current = null;
         }
-        // Reset refs and state for skip
-        userStoppedRef.current = false;
+        
+        // Stop recording if active
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+            mediaRecorderRef.current.stop();
+        }
+        // Cleanup audio stream
+        if (mediaStreamRef.current) {
+            mediaStreamRef.current.getTracks().forEach(track => track.stop());
+            mediaStreamRef.current = null;
+        }
+        audioChunksRef.current = [];
         finalTranscriptRef.current = '';
-        transcriptRef.current = '';
+        interimTranscriptRef.current = '';
+        
         setTranscript('');
         const newQuestionsSkipped = (interview.questionsSkipped || 0) + 1;
         console.log('Questions skipped updated:', newQuestionsSkipped);
@@ -521,11 +674,25 @@ const InterviewScreen = () => {
         console.log('Ending session early');
         console.log('Current questionWiseFeedback:', questionWiseFeedback);
         setEndingSession(true);
+        
+        // Stop speech recognition
         if (recognitionRef.current) {
             recognitionRef.current.stop();
+            recognitionRef.current = null;
         }
+        
+        // Stop recording if active
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+            mediaRecorderRef.current.stop();
+        }
+        // Cleanup audio stream
+        if (mediaStreamRef.current) {
+            mediaStreamRef.current.getTracks().forEach(track => track.stop());
+            mediaStreamRef.current = null;
+        }
+        
         // Call backend to end session and get feedback
-        api.endSession(interview.sessionId)
+        api.endSession(interview.sessionId, questionWiseFeedback)
             .then((result) => {
                 console.log('Session ended, response:', result);
                 if (result.final && result.summary) {
@@ -546,10 +713,9 @@ const InterviewScreen = () => {
     const handleLogoClick = () => {
         const confirmed = window.confirm('Are you sure you want to exit the interview? Your progress will not be saved.');
         if (confirmed) {
-            // End the interview silently and navigate to welcome
-            if (recognitionRef.current) {
-                recognitionRef.current.stop();
-            }
+            // End recording if active
+            stopAllRecording();
+            
             // Attempt to notify backend but don't wait for response
             api.endSession(interview.sessionId).catch(err => console.log('Session cleanup:', err));
             
@@ -580,12 +746,23 @@ const InterviewScreen = () => {
                 {panelState === 'coach-feedback' && (
                     <div className="w-full max-w-5xl">
                         <div className="flex flex-col items-center w-full text-center mb-8">
-                            <div className="mb-4 inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-primary/5 dark:bg-primary/20 border border-primary/10 dark:border-primary/30">
-                                <span className="relative flex h-2 w-2">
-                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
-                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
-                                </span>
-                                <span className="text-xs font-bold uppercase tracking-widest text-primary dark:text-teal-300">Feedback Analysis</span>
+                            <div className="flex items-center justify-between w-full mb-4">
+                                <div></div>
+                                <div className="mb-4 inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-primary/5 dark:bg-primary/20 border border-primary/10 dark:border-primary/30">
+                                    <span className="relative flex h-2 w-2">
+                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+                                    </span>
+                                    <span className="text-xs font-bold uppercase tracking-widest text-primary dark:text-teal-300">Feedback Analysis</span>
+                                </div>
+                                <button 
+                                    onClick={endSession}
+                                    disabled={endingSession}
+                                    className="text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 p-2 rounded transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                    title="End the interview session"
+                                >
+                                    <span className="material-symbols-outlined">{endingSession ? 'pending' : 'exit_to_app'}</span>
+                                </button>
                             </div>
                             <h3 className="text-2xl md:text-3xl font-bold leading-tight mb-2">Here is my feedback on your answer.</h3>
                             <p className="text-sm md:text-base text-gray-600 dark:text-gray-300">Question: {interview.currentQuestion || 'Question unavailable'}</p>
@@ -866,31 +1043,14 @@ const ListeningPanel = ({ onDone, transcript, setTranscript }) => (
             </div>
             <p className="text-primary font-bold text-lg md:text-xl animate-pulse">Listening...</p>
             <p className="text-gray-400 dark:text-gray-500 text-sm md:text-base mt-2">Speak clearly</p>
-            {FOR_TEST && (
-                <p className="text-gray-400 dark:text-gray-500 text-sm md:text-base mt-1">or type below</p>
-            )}
         </div>
         
-        {/* Text Input Option (Test Mode Only) */}
-        {FOR_TEST && (
-            <div className="w-full px-2 mb-2">
-                <textarea
-                    value={transcript}
-                    onChange={(e) => setTranscript(e.target.value)}
-                    placeholder="Type answer (TEST MODE)..."
-                    className="w-full p-2 bg-yellow-50 dark:bg-yellow-900/20 border-2 border-yellow-400 rounded-lg text-xs text-gray-900 dark:text-gray-100 placeholder-yellow-600 dark:placeholder-yellow-400 focus:outline-none focus:ring-2 focus:ring-yellow-500"
-                    rows="2"
-                />
-            </div>
-        )}
-        {!FOR_TEST && (
-            <div className="w-full px-2 mb-2 text-xs text-gray-500 dark:text-gray-400 text-center italic">
-                Speak into your microphone
-            </div>
-        )}
+        <div className="w-full px-2 mb-2 text-xs text-gray-500 dark:text-gray-400 text-center italic">
+            Speak into your microphone
+        </div>
         
         <div className="mt-auto pt-4 w-full flex flex-col items-center gap-2 relative z-20 pointer-events-auto">
-            <button onClick={onDone} className="relative z-20 px-4 py-2 bg-primary text-white font-bold rounded-lg text-sm hover:bg-primary/90 transition-all hover:scale-105 active:scale-95 shadow-lg pointer-events-auto">
+            <button onClick={() => onDone()} className="relative z-20 px-4 py-2 bg-primary text-white font-bold rounded-lg text-sm hover:bg-primary/90 transition-all hover:scale-105 active:scale-95 shadow-lg pointer-events-auto">
                 Done
             </button>
             <div className="relative group">

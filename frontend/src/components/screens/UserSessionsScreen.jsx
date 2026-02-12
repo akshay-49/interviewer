@@ -126,18 +126,19 @@ const UserSessionsScreen = () => {
             {/* Top Navigation Bar */}
             <header className="sticky top-0 z-50 w-full border-b border-[#e7f1f3] bg-white px-4 md:px-10 py-3 shadow-sm">
                 <div className="max-w-[1600px] mx-auto flex items-center justify-between">
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-3">
                         <button
                             onClick={() => navigateTo('admin-dashboard')}
                             className="p-2 hover:bg-[#e7f1f3] rounded-lg transition-colors"
+                            title="Back to Admin Dashboard"
                         >
                             <span className="material-symbols-outlined">arrow_back</span>
                         </button>
-                        <div className="flex items-center gap-3">
-                            <img src="/accellor-logo.svg" alt="Accellor" className="h-8"/>
-                            <div className="h-6 w-px bg-[#e7f1f3]"></div>
-                            <h2 className="text-[#0d191b] text-lg font-bold">User Sessions</h2>
-                        </div>
+                        <img src="/accellor-logo.svg" alt="Accellor" className="h-8"/>
+                        <div className="h-6 w-px bg-[#e7f1f3]"></div>
+                        <h2 className="text-[#0d191b] text-lg font-bold">
+                            {userInfo ? `${userInfo.full_name} - Sessions` : 'User Sessions'}
+                        </h2>
                     </div>
                 </div>
             </header>
@@ -165,36 +166,6 @@ const UserSessionsScreen = () => {
                     </div>
                 ) : (
                     <>
-                        {/* User Info Header */}
-                        {userInfo && (
-                            <div className="bg-white rounded-xl border border-[#e7f1f3] p-6 mb-6 shadow-sm">
-                                <div className="flex items-center gap-4">
-                                    <div className="size-16 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-2xl">
-                                        {userInfo.full_name ? userInfo.full_name.split(' ').map(n => n[0]).join('').toUpperCase() : '??'}
-                                    </div>
-                                    <div>
-                                        <h2 className="text-2xl font-bold text-[#0d191b]">{userInfo.full_name || 'Unknown User'}</h2>
-                                        <p className="text-[#4c8e9a]">{userInfo.email}</p>
-                                        <div className="flex items-center gap-3 mt-2">
-                                            {userInfo.job_title && (
-                                                <span className="text-xs bg-[#e7f1f3] px-2 py-1 rounded">
-                                                    {userInfo.job_title}
-                                                </span>
-                                            )}
-                                            {userInfo.experience_level && (
-                                                <span className="text-xs bg-[#e7f1f3] px-2 py-1 rounded">
-                                                    {userInfo.experience_level}
-                                                </span>
-                                            )}
-                                            <span className={`text-xs px-2 py-1 rounded ${userInfo.is_admin ? 'bg-primary/10 text-primary' : 'bg-slate-100 text-slate-700'}`}>
-                                                {userInfo.is_admin ? 'Admin' : 'User'}
-                                            </span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        )}
-
                         {/* Stats Cards */}
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                             <div className="bg-white p-5 rounded-xl border border-[#e7f1f3] shadow-sm">
@@ -267,7 +238,7 @@ const UserSessionsScreen = () => {
                                                     </td>
                                                     <td className="px-6 py-4 text-right">
                                                         <button
-                                                            onClick={() => navigateTo('report', { sessionId: session.session_id })}
+                                                            onClick={() => navigateTo('report', { sessionId: session.session_id, isAdmin: true })}
                                                             className="inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg border border-[#cfe4e7] text-[#4c8e9a] text-xs font-bold hover:bg-primary/5 hover:text-primary transition-all shadow-sm"
                                                         >
                                                             View Report

@@ -156,6 +156,7 @@ class AnswerRequest(BaseModel):
 
 class EndSessionRequest(BaseModel):
     session_id: str
+    question_wise_feedback: Optional[List[dict]] = None
 
 class ContinueRequest(BaseModel):
     session_id: str
@@ -389,6 +390,9 @@ def answer_interview(req: AnswerRequest):
                 "strengths": ev.strengths if hasattr(ev, 'strengths') else ev.get('strengths', []),
                 "weaknesses": ev.weaknesses if hasattr(ev, 'weaknesses') else ev.get('weaknesses', []),
             }
+            logger.info(f"DEBUG /interview/answer final: Returning evaluation_data for final submit: {evaluation_data}")
+        else:
+            logger.warning(f"DEBUG /interview/answer final: NO evaluation data available for final submit!")
 
         # Store final session results to Cosmos DB
         try:
@@ -479,6 +483,9 @@ def answer_interview(req: AnswerRequest):
                 "strengths": ev.strengths if hasattr(ev, 'strengths') else ev.get('strengths', []),
                 "weaknesses": ev.weaknesses if hasattr(ev, 'weaknesses') else ev.get('weaknesses', []),
             }
+            logger.info(f"DEBUG /interview/answer feedback step: Returning evaluation_data: {evaluation_data}")
+        else:
+            logger.warning(f"DEBUG /interview/answer feedback step: NO evaluation data for question {result.get('question_count')}")
             
         return {
             "final": False,
@@ -507,6 +514,9 @@ def answer_interview(req: AnswerRequest):
             "strengths": ev.strengths if hasattr(ev, 'strengths') else ev.get('strengths', []),
             "weaknesses": ev.weaknesses if hasattr(ev, 'weaknesses') else ev.get('weaknesses', []),
         }
+        logger.info(f"DEBUG /interview/answer next-question step: Returning evaluation_data: {evaluation_data}")
+    else:
+        logger.warning(f"DEBUG /interview/answer next-question step: NO evaluation data for question {result.get('question_count')}")
 
     # Combine transition + question naturally
     if transition and transition.strip():
@@ -552,6 +562,15 @@ def end_interview(req: EndSessionRequest):
         # which should be in the graph's memory now
         summary_result = end_interview_agent(cast(InterviewState, result))
         result.update(summary_result)
+    
+    # Step 3: Save question_wise_feedback to session document
+    if req.question_wise_feedback:
+        logger.info(f"Saving question_wise_feedback to session: {req.session_id}")
+        try:
+            from backend.core.cosmos import update_session_question_feedback
+            update_session_question_feedback(req.session_id, req.question_wise_feedback)
+        except Exception as e:
+            logger.error(f"Failed to save question_wise_feedback: {e}")
     
     logger.info(f"Interview ended early: session={req.session_id}")
     
@@ -673,6 +692,9 @@ class SaveSessionResultsRequest(BaseModel):
 def save_session_results(req: SaveSessionResultsRequest):
     """Save complete interview session results to Cosmos DB"""
     logger.info(f"Saving session results: session={req.session_id}, user={req.user_id}")
+    logger.info(f"DEBUG: Received question_wise_feedback with {len(req.question_wise_feedback)} items")
+    if req.question_wise_feedback:
+        logger.info(f"DEBUG: First feedback item: {req.question_wise_feedback[0]}")
     
     try:
         from backend.core.cosmos import sessions_container, serialize_for_cosmos
@@ -699,12 +721,16 @@ def save_session_results(req: SaveSessionResultsRequest):
             "completed_at": req.completed_at or datetime.utcnow().isoformat(),
         }
         
+        logger.info(f"DEBUG: Session doc being saved has {len(session_doc.get('question_wise_feedback', []))} feedback items")
+        
         # Serialize all datetime and complex objects
         serialized_doc = serialize_for_cosmos(session_doc)
         
+        logger.info(f"DEBUG: Serialized doc has {len(serialized_doc.get('question_wise_feedback', []))} feedback items")
+        
         # Save to Cosmos DB
         sessions_container.upsert_item(serialized_doc)
-        logger.info(f"Successfully saved session {req.session_id} to Cosmos DB")
+        logger.info(f"Successfully saved session {req.session_id} to Cosmos DB with {len(req.question_wise_feedback)} feedback items")
         
         return {
             "success": True,
@@ -713,6 +739,8 @@ def save_session_results(req: SaveSessionResultsRequest):
         }
     except Exception as e:
         logger.error(f"Error saving session results: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to save session results: {str(e)}")
 
 

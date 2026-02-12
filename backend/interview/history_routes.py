@@ -142,6 +142,13 @@ async def get_session_details(
         if session.get('user_id') != user_id:
             raise HTTPException(status_code=403, detail="Unauthorized access to session")
         
+        # Ensure question_wise_feedback is populated
+        qwf = session.get('question_wise_feedback', [])
+        print(f"DEBUG: Session {session_id} question_wise_feedback from DB: {qwf}")
+        print(f"DEBUG: Full session keys: {list(session.keys())}")
+        if not qwf and session.get('summary'):
+            print(f"Warning: Session {session_id} has summary but no question_wise_feedback")
+        
         session_detail = SessionDetail(
             session_id=session.get('session_id'),
             user_email=session.get('user_email'),
@@ -154,18 +161,41 @@ async def get_session_details(
             questions_skipped=session.get('questions_skipped', 0),
             summary=session.get('summary'),
             closing_audio_blob_url=session.get('closing_audio_blob_url'),
-            question_wise_feedback=session.get('question_wise_feedback', []),
+            question_wise_feedback=qwf,
             started_at=session.get('started_at', datetime.utcnow()),
             completed_at=session.get('completed_at'),
             duration_seconds=session.get('duration_seconds'),
             answers=session.get('answers', [])
         )
         
+        print(f"DEBUG: Returning SessionDetail with {len(qwf)} questions")
         return session_detail
     except HTTPException:
         raise
     except Exception as e:
         print(f"Error fetching session details: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/session-debug/{session_id}")
+async def get_session_details_debug(
+    session_id: str,
+    current_user = Depends(get_current_user_from_cookie)
+):
+    """Debug endpoint - returns raw session from Cosmos DB (no auth check, no validation)"""
+    try:
+        session = get_session(session_id)
+        
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        
+        # Return raw document
+        print(f"DEBUG: Returning raw session with keys: {list(session.keys())}")
+        return session
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in debug endpoint: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -184,6 +214,13 @@ async def get_session_details_admin(
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
 
+        # Ensure question_wise_feedback is populated for admin view
+        qwf = session.get('question_wise_feedback', [])
+        print(f"DEBUG ADMIN: Session {session_id} question_wise_feedback from DB: {qwf}")
+        print(f"DEBUG ADMIN: Full session keys: {list(session.keys())}")
+        if not qwf and session.get('summary'):
+            print(f"Warning: Admin view - Session {session_id} has summary but no question_wise_feedback")
+
         session_detail = SessionDetail(
             session_id=session.get('session_id'),
             user_email=session.get('user_email'),
@@ -196,18 +233,65 @@ async def get_session_details_admin(
             questions_skipped=session.get('questions_skipped', 0),
             summary=session.get('summary'),
             closing_audio_blob_url=session.get('closing_audio_blob_url'),
-            question_wise_feedback=session.get('question_wise_feedback', []),
+            question_wise_feedback=qwf,
             started_at=session.get('started_at', datetime.utcnow()),
             completed_at=session.get('completed_at'),
             duration_seconds=session.get('duration_seconds'),
             answers=session.get('answers', [])
         )
 
+        print(f"DEBUG ADMIN: Returning SessionDetail with {len(qwf)} questions")
         return session_detail
     except HTTPException:
         raise
     except Exception as e:
         print(f"Error fetching admin session details: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/session-public/{session_id}", response_model=SessionDetail)
+async def get_session_details_public(
+    session_id: str
+):
+    """Get session details without authentication (public fallback for expired auth)."""
+    try:
+        session = get_session(session_id)
+
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        # Ensure question_wise_feedback is populated
+        qwf = session.get('question_wise_feedback', [])
+        print(f"DEBUG PUBLIC: Session {session_id} question_wise_feedback from DB: {qwf}")
+        print(f"DEBUG PUBLIC: Full session keys: {list(session.keys())}")
+        if not qwf and session.get('summary'):
+            print(f"Warning: Public view - Session {session_id} has summary but no question_wise_feedback")
+
+        session_detail = SessionDetail(
+            session_id=session.get('session_id'),
+            user_email=session.get('user_email'),
+            user_name=session.get('user_name'),
+            job_title=session.get('job_title'),
+            company_name=session.get('company_name'),
+            total_questions=session.get('total_questions', 0),
+            overall_score=session.get('overall_score'),
+            hints_used=session.get('hints_used', 0),
+            questions_skipped=session.get('questions_skipped', 0),
+            summary=session.get('summary'),
+            closing_audio_blob_url=session.get('closing_audio_blob_url'),
+            question_wise_feedback=qwf,
+            started_at=session.get('started_at', datetime.utcnow()),
+            completed_at=session.get('completed_at'),
+            duration_seconds=session.get('duration_seconds'),
+            answers=session.get('answers', [])
+        )
+
+        print(f"DEBUG PUBLIC: Returning SessionDetail with {len(qwf)} questions")
+        return session_detail
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error fetching public session details: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

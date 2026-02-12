@@ -25,6 +25,8 @@ const ResultsScreen = () => {
     const saveSessionResults = async () => {
         try {
             console.log('Saving session results to Cosmos DB...');
+            console.log('interview.questionWiseFeedback at save time:', interview.questionWiseFeedback);
+            console.log('interview.questionWiseFeedback length:', interview.questionWiseFeedback?.length);
             
             // Calculate duration in seconds
             const now = new Date();
@@ -53,6 +55,8 @@ const ResultsScreen = () => {
             };
             
             console.log('Session data to save:', sessionData);
+            console.log('question_wise_feedback in sessionData:', sessionData.question_wise_feedback);
+            console.log('question_wise_feedback length in sessionData:', sessionData.question_wise_feedback.length);
             
             const result = await historyApi.saveSessionResults(sessionData);
             console.log('Session saved successfully:', result);
@@ -377,7 +381,7 @@ const ResultsScreen = () => {
                 )}
 
                 {/* Actions */}
-                <div className="flex flex-wrap gap-2 justify-center">
+                <div className="flex flex-wrap gap-2 justify-center mb-12">
                     <button onClick={exportToPDF} className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-bold rounded-lg text-sm shadow-lg transition-all flex items-center gap-2">
                         <span className="material-symbols-outlined text-lg">download</span>
                         Export as PDF

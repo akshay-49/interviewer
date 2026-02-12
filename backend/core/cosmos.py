@@ -197,9 +197,21 @@ def get_session(session_id: str) -> Optional[Dict]:
             enable_cross_partition_query=True,
             max_item_count=1
         ))
-        return items[0] if items else None
+        if items:
+            session = items[0]
+            print(f"DEBUG get_session: Fetched session {session_id}")
+            print(f"DEBUG get_session: Keys in session: {list(session.keys())}")
+            print(f"DEBUG get_session: question_wise_feedback in session: {session.get('question_wise_feedback', 'KEY_NOT_FOUND')}")
+            if 'question_wise_feedback' in session:
+                print(f"DEBUG get_session: question_wise_feedback length: {len(session.get('question_wise_feedback', []))}")
+            return session
+        else:
+            print(f"DEBUG get_session: No session found for {session_id}")
+            return None
     except Exception as e:
         print(f"Error getting session: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -286,6 +298,28 @@ def update_session_closing_audio(session_id: str, audio_blob_url: str) -> bool:
         return True
     except Exception as e:
         print(f"Error updating session closing audio: {e}")
+        return False
+
+
+def update_session_question_feedback(session_id: str, question_wise_feedback: List[dict]) -> bool:
+    """Update session with question-wise feedback"""
+    try:
+        print(f"DEBUG update_session_question_feedback: Updating session {session_id} with {len(question_wise_feedback)} questions")
+        session = get_session(session_id)
+        if not session:
+            print(f"ERROR: Session {session_id} not found")
+            return False
+        
+        print(f"DEBUG: Setting question_wise_feedback in session: {session.get('question_wise_feedback', 'KEY_NOT_FOUND')}")
+        session['question_wise_feedback'] = question_wise_feedback
+        print(f"DEBUG: Session after update has {len(session.get('question_wise_feedback', []))} questions")
+        sessions_container.upsert_item(session)
+        print(f"DEBUG: Upserted session {session_id} successfully")
+        return True
+    except Exception as e:
+        print(f"Error updating session question feedback: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 

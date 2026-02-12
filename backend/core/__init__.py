@@ -7,6 +7,7 @@ from .cosmos import (
     get_user_sessions,
     add_answer_to_session,
     update_session_summary,
+    update_session_question_feedback,
     delete_session,
     init_cosmos_db
 )
@@ -26,6 +27,7 @@ __all__ = [
     "get_user_sessions",
     "add_answer_to_session",
     "update_session_summary",
+    "update_session_question_feedback",
     "delete_session",
     "init_cosmos_db",
     "question_llm",
