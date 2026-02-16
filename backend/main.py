@@ -1104,15 +1104,64 @@ def send_invite(req: dict):
                 f"Invite link:\n{invite_link}\n\n"
                 "If you did not expect this invite, you can ignore this email."
             )
-            html_body = (
-                f"<p>Hi {candidate_name},</p>"
-                "<p>You've been invited to an interview.</p>"
-                f"<p><strong>Role:</strong> {role or 'Interview'}<br/>"
-                f"<strong>Level:</strong> {seniority_level}</p>"
-                f"<p><strong>Invite link:</strong> "
-                f"<a href=\"{invite_link}\">{invite_link}</a></p>"
-                "<p>If you did not expect this invite, you can ignore this email.</p>"
-            )
+            html_body = f"""
+<!DOCTYPE html>
+<html lang=\"en\">
+    <head>
+        <meta charset=\"utf-8\" />
+        <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+        <title>Accellor Interview Invite</title>
+    </head>
+    <body style=\"margin:0;padding:0;background-color:#f6f8f8;font-family:Arial,Helvetica,sans-serif;color:#0d191b;\">
+        <table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" width=\"100%\" style=\"background-color:#f6f8f8;padding:32px 16px;\">
+            <tr>
+                <td align=\"center\">
+                    <table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" width=\"100%\" style=\"max-width:620px;background:#ffffff;border:1px solid #e7f1f3;border-radius:16px;overflow:hidden;\">
+                        <tr>
+                            <td style=\"padding:24px 28px;border-bottom:1px solid #e7f1f3;\">
+                                <img src=\"https://cdn.prod.website-files.com/67ee21872d9955a8ce7e7cbd/67ee21872d9955a8ce7e7e92_img_accellorLogoOriginal.svg\" alt=\"Accellor\" style=\"height:32px;display:block;\" />
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style=\"padding:28px;\">
+                                <p style=\"margin:0 0 12px;font-size:16px;\">Hi {candidate_name},</p>
+                                <h1 style=\"margin:0 0 8px;font-size:22px;line-height:1.3;\">You are invited to an interview</h1>
+                                <p style=\"margin:0 0 18px;color:#4c8e9a;font-size:14px;\">We have set up your interview details below.</p>
+
+                                <table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" width=\"100%\" style=\"background:#f8fbfc;border:1px solid #e7f1f3;border-radius:12px;margin:0 0 20px;\">
+                                    <tr>
+                                        <td style=\"padding:14px 16px;font-size:14px;\">
+                                            <strong style=\"color:#0d191b;\">Role:</strong> {role or 'Interview'}<br />
+                                            <strong style=\"color:#0d191b;\">Level:</strong> {seniority_level}
+                                        </td>
+                                    </tr>
+                                </table>
+
+                                <p style=\"margin:0 0 16px;font-size:14px;\">Use the button below to access your interview:</p>
+                                <table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin:0 0 20px;\">
+                                    <tr>
+                                        <td align=\"center\" bgcolor=\"#11b5ae\" style=\"border-radius:10px;\">
+                                            <a href=\"{invite_link}\" style=\"display:inline-block;padding:12px 18px;color:#0d191b;text-decoration:none;font-weight:700;font-size:14px;\">Open Interview</a>
+                                        </td>
+                                    </tr>
+                                </table>
+
+                                <p style=\"margin:0 0 6px;color:#4c8e9a;font-size:12px;\">Or copy and paste this link:</p>
+                                <p style=\"margin:0 0 18px;font-size:12px;word-break:break-all;\"><a href=\"{invite_link}\" style=\"color:#0d191b;\">{invite_link}</a></p>
+
+                                <p style=\"margin:0;color:#7a8a8c;font-size:12px;\">If you did not expect this invite, you can ignore this email.</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style=\"padding:18px 28px;border-top:1px solid #e7f1f3;color:#9aa7aa;font-size:11px;\">© 2026 Accellor</td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+        </table>
+    </body>
+</html>
+"""
 
             try:
                 mailgun_url = f"{mailgun_base_url.rstrip('/')}/v3/{mailgun_domain}/messages"

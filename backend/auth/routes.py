@@ -274,6 +274,8 @@ def accept_invite(request: AcceptInviteRequest, auth0_user: dict = Depends(get_c
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invite access disabled")
 
         invited_email = (invite.get("candidate_email") or "").lower()
+        if invite.get("candidate_name"):
+            user_name = invite.get("candidate_name")
         if invited_email and invited_email != user_email:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invite email mismatch")
 
@@ -296,6 +298,8 @@ def accept_invite(request: AcceptInviteRequest, auth0_user: dict = Depends(get_c
             "user_email": user_email,
             "role": invite.get("role"),
             "seniority_level": invite.get("seniority_level"),
+            "job_title": invite.get("role"),
+            "experience_level": invite.get("seniority_level"),
             "job_description": invite.get("job_description"),
             "invite_code": invite_code,
             "invite_status": "accepted",

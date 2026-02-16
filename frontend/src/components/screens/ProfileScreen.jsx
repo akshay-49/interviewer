@@ -62,9 +62,9 @@ const ProfileScreen = () => {
                     user_id: profile.user_id,
                     user_name: profile.user_name || authProfile?.full_name || contextUser?.name || '',
                     user_email: profile.user_email || authProfile?.email || contextUser?.email || '',
-                    job_title: profile.job_title || '',
+                    job_title: profile.job_title || profile.role || '',
                     company_name: profile.company_name || '',
-                    experience_level: profile.experience_level || ''
+                    experience_level: profile.experience_level || profile.seniority_level || ''
                 };
                 setFormData(profileData);
             } else {

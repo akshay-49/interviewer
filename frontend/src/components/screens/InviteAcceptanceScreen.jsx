@@ -43,8 +43,9 @@ const InviteAcceptanceScreen = ({ inviteCode }) => {
             const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
             const returnTo = `${window.location.origin}/callback?invite_code=${encodeURIComponent(inviteCode || '')}`;
             const loginHint = inviteData?.candidate_email || '';
+            const screenHint = inviteData?.user_exists ? 'login' : 'signup';
             const params = new URLSearchParams({
-                screen_hint: 'signup',
+                screen_hint: screenHint,
                 login_hint: loginHint,
                 return_to: returnTo
             });
@@ -215,8 +216,14 @@ const InviteAcceptanceScreen = ({ inviteCode }) => {
                 {/* Sign Up Section */}
                 <div className="bg-white rounded-xl border border-[#cfe4e7] p-6 md:p-8 flex flex-col gap-6 shadow-sm">
                     <div>
-                        <h2 className="text-[#0d191b] text-2xl font-bold leading-tight">Create Your Account</h2>
-                        <p className="text-gray-500 mt-1">You'll be redirected to Auth0 to complete your sign up.</p>
+                        <h2 className="text-[#0d191b] text-2xl font-bold leading-tight">
+                            {inviteData.user_exists ? 'Sign In to Continue' : 'Create Your Account'}
+                        </h2>
+                        <p className="text-gray-500 mt-1">
+                            {inviteData.user_exists
+                                ? "We found an existing account for this invite. You'll be redirected to sign in."
+                                : "You'll be redirected to Auth0 to complete your sign up."}
+                        </p>
                     </div>
                     {error && (
                         <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex gap-3">
@@ -225,7 +232,9 @@ const InviteAcceptanceScreen = ({ inviteCode }) => {
                         </div>
                     )}
                     <p className="text-gray-500 text-sm">
-                        We will prefill your email address and validate your invite during sign up.
+                        {inviteData.user_exists
+                            ? 'We will prefill your email address and validate your invite after you sign in.'
+                            : 'We will prefill your email address and validate your invite during sign up.'}
                     </p>
                 </div>
 
@@ -236,9 +245,15 @@ const InviteAcceptanceScreen = ({ inviteCode }) => {
                         disabled={startingInterview}
                         className="w-full md:w-auto min-w-[320px] px-10 py-4 bg-primary text-[#0d191b] text-lg font-black rounded-xl shadow-lg hover:shadow-primary/30 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                        {startingInterview ? 'Redirecting...' : 'Continue to Sign Up'}
+                        {startingInterview
+                            ? 'Redirecting...'
+                            : inviteData.user_exists
+                                ? 'Continue to Sign In'
+                                : 'Continue to Sign Up'}
                     </button>
-                    <p className="text-gray-400 text-xs">By clicking "Continue to Sign Up", you agree to our Terms of Service and Privacy Policy.</p>
+                    <p className="text-gray-400 text-xs">
+                        By clicking "Continue", you agree to our Terms of Service and Privacy Policy.
+                    </p>
                 </div>
             </main>
 
