@@ -25,6 +25,7 @@ const AdminLoginScreen = () => {
                 if (result?.account) {
                     console.log('AdminLoginScreen: Found account from redirect');
                     verificationInProgressRef.current = true;
+                    sessionStorage.setItem('adminLoginVerifying', 'true');
                     setIsLoading(true);
                     
                     // Clear flag immediately to prevent loops
@@ -52,12 +53,14 @@ const AdminLoginScreen = () => {
                     await verifyAndLogin(result);
                 } else {
                     // No redirect result, show login button
+                    sessionStorage.removeItem('adminLoginVerifying');
                     setIsLoading(false);
                 }
             } catch (err) {
                 console.error('Microsoft redirect error:', err);
                 setError('Microsoft login failed. Please try again.');
                 sessionStorage.removeItem('adminLoginInProgress');
+                sessionStorage.removeItem('adminLoginVerifying');
                 verificationInProgressRef.current = false;
                 setIsLoading(false);
             }
@@ -75,6 +78,8 @@ const AdminLoginScreen = () => {
             if (!account) {
                 console.error('No account found');
                 setError('No account found. Please login again.');
+                sessionStorage.removeItem('adminLoginVerifying');
+                setIsLoading(false);
                 return;
             }
 
@@ -129,6 +134,8 @@ const AdminLoginScreen = () => {
                 if (!isAccellorUser) {
                     setError(`Access denied. Only @accellor.com accounts allowed. Your email: ${email}`);
                     sessionStorage.removeItem('adminLoginInProgress'); // Clear flag
+                    sessionStorage.removeItem('adminLoginVerifying');
+                    setIsLoading(false);
                     // Log out the user
                     await msalInstance.logoutRedirect();
                     return;
@@ -136,6 +143,7 @@ const AdminLoginScreen = () => {
 
                 // Token stored in httpOnly cookie by backend (more secure than localStorage)
                 sessionStorage.removeItem('adminLoginInProgress'); // Clear flag
+                sessionStorage.removeItem('adminLoginVerifying');
 
                 console.log('Login successful, navigating to admin dashboard');
                 
@@ -152,10 +160,14 @@ const AdminLoginScreen = () => {
                 const errorMsg = data.detail || 'Verification failed';
                 console.error('Verification error:', errorMsg);
                 setError(errorMsg);
+                sessionStorage.removeItem('adminLoginVerifying');
+                setIsLoading(false);
             }
         } catch (err) {
             console.error('Verification error:', err);
             setError(`Error: ${err.message}`);
+            sessionStorage.removeItem('adminLoginVerifying');
+            setIsLoading(false);
         }
     };
 

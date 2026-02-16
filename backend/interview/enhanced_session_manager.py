@@ -48,7 +48,8 @@ class SessionManager:
             'completed_at': None,
             'overall_score': None,
             'summary': None,
-            'closing_audio_blob_url': None
+            'closing_audio_blob_url': None,
+            'session_recording_blob_url': None
         }
         
         # Store in memory for current session

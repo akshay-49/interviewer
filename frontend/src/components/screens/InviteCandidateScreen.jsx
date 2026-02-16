@@ -21,6 +21,7 @@ const InviteCandidateScreen = () => {
         activeLinks: 0
     });
     const [submitting, setSubmitting] = useState(false);
+    const [resendingInviteId, setResendingInviteId] = useState(null);
 
     // Fetch invitations from backend
     useEffect(() => {
@@ -168,6 +169,40 @@ const InviteCandidateScreen = () => {
         } catch (error) {
             console.error('Error deleting invite:', error);
             alert('Failed to delete invite');
+        }
+    };
+
+    const handleResendInvite = async (invite) => {
+        if (resendingInviteId) {
+            return;
+        }
+
+        setResendingInviteId(invite.id);
+
+        try {
+            const response = await fetch(`http://localhost:8000/admin/resend-invite/${invite.invite_code}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to resend invite');
+            }
+
+            const data = await response.json();
+            setToastMessage({
+                title: 'Invite Resent',
+                subtitle: `Email resent to ${invite.candidate_email}.`
+            });
+            setShowSuccessToast(true);
+            setTimeout(() => setShowSuccessToast(false), 5000);
+            fetchInvitations();
+            console.log('Invite resent:', data);
+        } catch (error) {
+            console.error('Error resending invite:', error);
+            alert('Failed to resend invite. Please try again.');
+        } finally {
+            setResendingInviteId(null);
         }
     };
 
@@ -342,7 +377,11 @@ const InviteCandidateScreen = () => {
                                     <button className="p-2 border border-[#cfe4e7] rounded hover:bg-[#f8fbfc]">
                                         <span className="material-symbols-outlined text-xl">filter_list</span>
                                     </button>
-                                    <button className="p-2 border border-[#cfe4e7] rounded hover:bg-[#f8fbfc]">
+                                    <button
+                                        type="button"
+                                        onClick={fetchInvitations}
+                                        className="p-2 border border-[#cfe4e7] rounded hover:bg-[#f8fbfc]"
+                                    >
                                         <span className="material-symbols-outlined text-xl">refresh</span>
                                     </button>
                                 </div>
@@ -424,6 +463,18 @@ const InviteCandidateScreen = () => {
                                                             </button>
                                                         </td>
                                                         <td className="px-6 py-4 text-right">
+                                                            <button 
+                                                                onClick={() => handleResendInvite(invite)}
+                                                                disabled={resendingInviteId === invite.id || invite.status === 'used' || invite.status === 'expired'}
+                                                                className={`p-2 rounded-lg transition-colors ${resendingInviteId === invite.id || invite.status === 'used' || invite.status === 'expired'
+                                                                    ? 'text-gray-300 cursor-not-allowed'
+                                                                    : 'text-primary hover:bg-primary/10'}`}
+                                                                title={invite.status === 'used' || invite.status === 'expired' ? 'Cannot resend used or expired invite' : 'Resend invite email'}
+                                                            >
+                                                                <span className="material-symbols-outlined text-lg">
+                                                                    {resendingInviteId === invite.id ? 'hourglass_empty' : 'forward_to_inbox'}
+                                                                </span>
+                                                            </button>
                                                             <button 
                                                                 onClick={() => handleDeleteInvite(invite)}
                                                                 className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"

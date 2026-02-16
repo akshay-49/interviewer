@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useInterview } from '../../context/InterviewContext';
-import { historyApi } from '../../utils/api';
+import { api, historyApi } from '../../utils/api';
 
 const ReportScreen = () => {
     const { navigateTo, currentParams } = useInterview();
@@ -8,6 +8,8 @@ const ReportScreen = () => {
     const [sessionData, setSessionData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [sessionRecordingUrl, setSessionRecordingUrl] = useState(null);
+    const recordingMediaRef = useRef(null);
 
     const handleShare = () => {
         const shareText = `Interview Report - ${sessionData.job_title || 'Session'}\nScore: ${sessionData.overall_score.toFixed(1)}/10\nCompleted: ${new Date(sessionData.completed_at).toLocaleDateString()}`;
@@ -30,6 +32,48 @@ const ReportScreen = () => {
     useEffect(() => {
         loadSessionData();
     }, [currentParams?.sessionId]);
+
+    useEffect(() => {
+        if (!sessionData?.session_recording_blob_url) {
+            setSessionRecordingUrl(null);
+            return;
+        }
+
+        if (sessionData.session_recording_blob_url.includes('?')) {
+            setSessionRecordingUrl(sessionData.session_recording_blob_url);
+            return;
+        }
+
+        api.getBlobUrlWithSAS(sessionData.session_recording_blob_url)
+            .then((url) => setSessionRecordingUrl(url || sessionData.session_recording_blob_url))
+            .catch(() => setSessionRecordingUrl(sessionData.session_recording_blob_url));
+    }, [sessionData]);
+
+    useEffect(() => {
+        const mediaEl = recordingMediaRef.current;
+        if (!mediaEl || !sessionRecordingUrl) return;
+
+        const handleLoadedMetadata = () => {
+            if (Number.isFinite(mediaEl.duration)) {
+                return;
+            }
+            // WebM files can report Infinity duration; seek to force duration calculation.
+            const seekToEnd = () => {
+                mediaEl.currentTime = 1e101;
+            };
+            const handleTimeUpdate = () => {
+                mediaEl.currentTime = 0;
+                mediaEl.removeEventListener('timeupdate', handleTimeUpdate);
+            };
+            mediaEl.addEventListener('timeupdate', handleTimeUpdate, { once: true });
+            seekToEnd();
+        };
+
+        mediaEl.addEventListener('loadedmetadata', handleLoadedMetadata);
+        return () => {
+            mediaEl.removeEventListener('loadedmetadata', handleLoadedMetadata);
+        };
+    }, [sessionRecordingUrl]);
 
     const loadSessionData = async () => {
         try {
@@ -167,6 +211,7 @@ const ReportScreen = () => {
     const questions = sessionData.question_wise_feedback || [];
     const summary = sessionData.summary || {};
     const overallScore = sessionData.overall_score || 0;
+    const hasSessionRecording = !!sessionData.session_recording_blob_url;
 
     // Debug logging
     console.log('ReportScreen - questions.length:', questions.length);
@@ -226,6 +271,43 @@ const ReportScreen = () => {
                             </div>
                         </div>
                     </div>
+
+                    {hasSessionRecording && (
+                        <div className="mb-8 bg-white dark:bg-slate-800 rounded-xl border border-gray-200 dark:border-slate-700 p-5 shadow-sm">
+                            <div className="flex items-center gap-3 mb-4">
+                                <span className="material-symbols-outlined text-primary text-2xl">
+                                    {sessionData.recording_mode === 'video' ? 'video_library' : 'hearing'}
+                                </span>
+                                <div>
+                                    <h2 className="text-lg font-bold text-slate-900 dark:text-white">Full Interview Recording</h2>
+                                    <p className="text-sm text-gray-500 dark:text-gray-400">Playback from start to finish</p>
+                                </div>
+                            </div>
+                            {sessionRecordingUrl ? (
+                                sessionData.recording_mode === 'video' ? (
+                                    <video
+                                        controls
+                                        ref={recordingMediaRef}
+                                        className="w-full rounded-lg bg-black"
+                                        style={{ maxHeight: '480px' }}
+                                    >
+                                        <source src={sessionRecordingUrl} type="video/webm" />
+                                        Your browser does not support the video element.
+                                    </video>
+                                ) : (
+                                    <audio controls ref={recordingMediaRef} className="w-full">
+                                        <source src={sessionRecordingUrl} type="audio/webm" />
+                                        Your browser does not support the audio element.
+                                    </audio>
+                                )
+                            ) : (
+                                <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                                    <span className="material-symbols-outlined text-base animate-spin">autorenew</span>
+                                    Preparing recording playback...
+                                </div>
+                            )}
+                        </div>
+                    )}
 
                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
                         {/* Questions Section */}

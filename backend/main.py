@@ -15,6 +15,8 @@ import json
 import logging
 import requests
 from datetime import datetime, timedelta
+from pathlib import Path
+from dotenv import load_dotenv
 
 from backend.interview.models import InterviewState
 from typing import cast
@@ -32,6 +34,10 @@ from backend.interview.recording_routes import router as recording_router
 from backend.interview.history_routes import router as history_router
 from backend.core.cosmos import init_cosmos_db
 from backend.interview.enhanced_session_manager import SessionManager
+
+# Load .env from project root with override to ensure local settings take precedence
+root_dir = Path(__file__).resolve().parent.parent
+load_dotenv(root_dir / '.env', override=True)
 
 # Configure logging
 logging.basicConfig(
@@ -687,6 +693,7 @@ class SaveSessionResultsRequest(BaseModel):
     answers: Optional[List[Dict[str, Any]]] = None
     question_wise_feedback: List[Dict[str, Any]]  # All Q&A with evaluations
     recording_mode: Optional[str] = 'audio'  # 'audio' or 'video'
+    session_recording_blob_url: Optional[str] = None
     duration_seconds: Optional[int] = None
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
@@ -701,8 +708,13 @@ def save_session_results(req: SaveSessionResultsRequest):
         logger.info(f"DEBUG: First feedback item: {req.question_wise_feedback[0]}")
     
     try:
-        from backend.core.cosmos import sessions_container, serialize_for_cosmos
+        from backend.core.cosmos import sessions_container, serialize_for_cosmos, get_session
         from datetime import datetime
+
+        existing_session = get_session(req.session_id) or {}
+        existing_recording_url = existing_session.get("session_recording_blob_url")
+        existing_closing_audio_url = existing_session.get("closing_audio_blob_url")
+        recording_url = req.session_recording_blob_url or existing_recording_url
         
         # Build the session document
         session_doc = {
@@ -721,6 +733,8 @@ def save_session_results(req: SaveSessionResultsRequest):
             "answers": req.answers or [],
             "question_wise_feedback": req.question_wise_feedback,
             "recording_mode": req.recording_mode,
+            "session_recording_blob_url": recording_url,
+            "closing_audio_blob_url": existing_closing_audio_url,
             "duration_seconds": req.duration_seconds,
             "started_at": req.started_at,
             "completed_at": req.completed_at or datetime.utcnow().isoformat(),
@@ -1078,6 +1092,8 @@ def send_invite(req: dict):
             "job_description": job_description,
             "recording_mode": recording_mode,  # 'audio' or 'video'
             "created_at": datetime.utcnow().isoformat(),
+            "last_sent_at": datetime.utcnow().isoformat(),
+            "resend_count": 0,
             "status": "sent",
             "interview_completed": False,
             "access_enabled": True
@@ -1197,6 +1213,162 @@ def send_invite(req: dict):
     except Exception as e:
         logger.error(f"Error creating invite: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to create invite: {str(e)}")
+
+
+@app.post("/admin/resend-invite/{invite_code}")
+def resend_invite(invite_code: str):
+    """Resend an existing invite email"""
+    try:
+        from backend.core.cosmos import client
+        from azure.cosmos.partition_key import PartitionKey
+
+        db = client.get_database_client("interviewer")
+
+        try:
+            invites_container = db.get_container_client("invites")
+        except Exception:
+            invites_container = db.create_container(
+                id="invites",
+                partition_key=PartitionKey(path="/invite_code")
+            )
+
+        query = "SELECT * FROM invites WHERE invites.invite_code = @code"
+        items = list(invites_container.query_items(
+            query=query,
+            parameters=[{"name": "@code", "value": invite_code}],
+            max_item_count=1,
+            enable_cross_partition_query=True
+        ))
+
+        if not items:
+            raise HTTPException(status_code=404, detail="Invite not found")
+
+        invite = items[0]
+        status = invite.get("status", "sent")
+        if status in ["used", "expired"]:
+            raise HTTPException(status_code=400, detail=f"Invite is {status} and cannot be resent")
+
+        if not invite.get("access_enabled", True):
+            raise HTTPException(status_code=400, detail="Invite access is disabled")
+
+        candidate_name = invite.get("candidate_name")
+        candidate_email = invite.get("candidate_email")
+        role = invite.get("role", "")
+        seniority_level = invite.get("seniority_level", "Senior")
+
+        invite_base_url = os.getenv("INVITE_BASE_URL", "http://localhost:5173").rstrip("/")
+        invite_link = f"{invite_base_url}/invite/{invite_code}"
+
+        mailgun_api_key = os.getenv("MAILGUN_API_KEY")
+        mailgun_domain = os.getenv("MAILGUN_DOMAIN")
+        mailgun_from = os.getenv("MAILGUN_FROM")
+        mailgun_base_url = os.getenv("MAILGUN_BASE_URL", "https://api.mailgun.net")
+
+        if mailgun_api_key and mailgun_domain and mailgun_from:
+            subject = f"You're invited to an interview - {role or 'Interview'}"
+            text_body = (
+                f"Hi {candidate_name},\n\n"
+                "You've been invited to an interview.\n"
+                f"Role: {role or 'Interview'}\n"
+                f"Level: {seniority_level}\n\n"
+                f"Invite link:\n{invite_link}\n\n"
+                "If you did not expect this invite, you can ignore this email."
+            )
+            html_body = f"""
+<!DOCTYPE html>
+<html lang=\"en\">
+    <head>
+        <meta charset=\"utf-8\" />
+        <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+        <title>Accellor Interview Invite</title>
+    </head>
+    <body style=\"margin:0;padding:0;background-color:#f6f8f8;font-family:Arial,Helvetica,sans-serif;color:#0d191b;\">
+        <table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" width=\"100%\" style=\"background-color:#f6f8f8;padding:32px 16px;\">
+            <tr>
+                <td align=\"center\">
+                    <table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" width=\"100%\" style=\"max-width:620px;background:#ffffff;border:1px solid #e7f1f3;border-radius:16px;overflow:hidden;\">
+                        <tr>
+                            <td style=\"padding:24px 28px;border-bottom:1px solid #e7f1f3;\">
+                                <img src=\"https://cdn.prod.website-files.com/67ee21872d9955a8ce7e7cbd/67ee21872d9955a8ce7e7e92_img_accellorLogoOriginal.svg\" alt=\"Accellor\" style=\"height:32px;display:block;\" />
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style=\"padding:28px;\">
+                                <p style=\"margin:0 0 12px;font-size:16px;\">Hi {candidate_name},</p>
+                                <h1 style=\"margin:0 0 8px;font-size:22px;line-height:1.3;\">You are invited to an interview</h1>
+                                <p style=\"margin:0 0 18px;color:#4c8e9a;font-size:14px;\">We have set up your interview details below.</p>
+
+                                <table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" width=\"100%\" style=\"background:#f8fbfc;border:1px solid #e7f1f3;border-radius:12px;margin:0 0 20px;\">
+                                    <tr>
+                                        <td style=\"padding:14px 16px;font-size:14px;\">
+                                            <strong style=\"color:#0d191b;\">Role:</strong> {role or 'Interview'}<br />
+                                            <strong style=\"color:#0d191b;\">Level:</strong> {seniority_level}
+                                        </td>
+                                    </tr>
+                                </table>
+
+                                <p style=\"margin:0 0 16px;font-size:14px;\">Use the button below to access your interview:</p>
+                                <table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin:0 0 20px;\">
+                                    <tr>
+                                        <td align=\"center\" bgcolor=\"#11b5ae\" style=\"border-radius:10px;\">
+                                            <a href=\"{invite_link}\" style=\"display:inline-block;padding:12px 18px;color:#0d191b;text-decoration:none;font-weight:700;font-size:14px;\">Open Interview</a>
+                                        </td>
+                                    </tr>
+                                </table>
+
+                                <p style=\"margin:0 0 6px;color:#4c8e9a;font-size:12px;\">Or copy and paste this link:</p>
+                                <p style=\"margin:0 0 18px;font-size:12px;word-break:break-all;\"><a href=\"{invite_link}\" style=\"color:#0d191b;\">{invite_link}</a></p>
+
+                                <p style=\"margin:0;color:#7a8a8c;font-size:12px;\">If you did not expect this invite, you can ignore this email.</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td style=\"padding:18px 28px;border-top:1px solid #e7f1f3;color:#9aa7aa;font-size:11px;\">© 2026 Accellor</td>
+                        </tr>
+                    </table>
+                </td>
+            </tr>
+        </table>
+    </body>
+</html>
+"""
+
+            try:
+                mailgun_url = f"{mailgun_base_url.rstrip('/')}/v3/{mailgun_domain}/messages"
+                response = requests.post(
+                    mailgun_url,
+                    auth=("api", mailgun_api_key),
+                    data={
+                        "from": mailgun_from,
+                        "to": [candidate_email],
+                        "subject": subject,
+                        "text": text_body,
+                        "html": html_body
+                    },
+                    timeout=10
+                )
+                if response.status_code >= 400:
+                    logger.warning(f"Mailgun send failed: {response.status_code} - {response.text}")
+            except Exception as e:
+                logger.warning(f"Mailgun send error: {e}")
+        else:
+            logger.info("Mailgun not configured; skipping invite email.")
+
+        invite["last_sent_at"] = datetime.utcnow().isoformat()
+        invite["resend_count"] = int(invite.get("resend_count", 0)) + 1
+        invites_container.replace_item(item=invite["id"], body=invite)
+
+        return {
+            "success": True,
+            "message": "Invite resent successfully",
+            "invite_code": invite_code,
+            "invite_link": invite_link
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error resending invite: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to resend invite: {str(e)}")
 
 
 @app.post("/admin/set-recording-mode")

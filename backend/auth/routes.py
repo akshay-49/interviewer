@@ -332,12 +332,10 @@ def accept_invite(request: AcceptInviteRequest, auth0_user: dict = Depends(get_c
             "updated_at": datetime.utcnow()
         })
 
-        invite["status"] = "used"
-        invite["access_enabled"] = False
-        invite["registered_at"] = now_iso
-        invite["user_id"] = user_sub
-        invite["auth0_user_id"] = user_sub
-        invites_container.replace_item(item=invite["id"], body=invite)
+        try:
+            invites_container.delete_item(item=invite["id"], partition_key=invite.get("invite_code"))
+        except Exception as delete_error:
+            logger.warning(f"Failed to delete used invite {invite_code}: {delete_error}")
 
         return {
             "success": True,

@@ -50,6 +50,7 @@ const ResultsScreen = () => {
                 answers: interview.answers || [],
                 question_wise_feedback: interview.questionWiseFeedback || [],
                 recording_mode: interview.recordingMode || 'audio',
+                session_recording_blob_url: interview.sessionRecordingUrl || null,
                 started_at: interview.startedAt || now.toISOString(),
                 completed_at: now.toISOString(),
                 duration_seconds: durationSeconds

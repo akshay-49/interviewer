@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useInterview } from '../../context/InterviewContext';
-import { api, speakText, playAudioFromBase64, recordAudio } from '../../utils/api';
+import { api, speakText, playAudioFromBase64 } from '../../utils/api';
 import { createSpeechRecognizer } from '../../utils/azureSpeech';
 
 const InterviewScreen = () => {
@@ -32,8 +32,10 @@ const InterviewScreen = () => {
     const [isSubmitting, setIsSubmitting] = useState(false); // Prevent double-click on submit/skip/proceed
     const mediaRecorderRef = useRef(null);
     const mediaStreamRef = useRef(null);
-    const audioChunksRef = useRef([]);
+    const activeStreamsRef = useRef(new Set());
+    const sessionRecordingChunksRef = useRef([]);
     const recordingPreviewRef = useRef(null); // Video preview during recording
+    const previewContainerRef = useRef(null);
     // Speech recognition refs
     const recognitionRef = useRef(null);
     const finalTranscriptRef = useRef('');
@@ -41,6 +43,10 @@ const InterviewScreen = () => {
     const audioPlayedRef = useRef(false);
     const panelStateRef = useRef(panelState);
     const allowRecordingRef = useRef(false);
+    const [isSessionRecording, setIsSessionRecording] = useState(false);
+    const [sessionRecordingEnabled, setSessionRecordingEnabled] = useState(true);
+    const [previewPosition, setPreviewPosition] = useState({ x: 24, y: 24 });
+    const previewDragRef = useRef({ isDragging: false, offsetX: 0, offsetY: 0 });
 
     // Speak question text when component mounts or when new question arrives
     useEffect(() => {
@@ -65,46 +71,237 @@ const InterviewScreen = () => {
         }
     }, [interview.questionText]);
 
-    const stopAllRecording = () => {
-        console.log('stopAllRecording called');
-        allowRecordingRef.current = false;
-        
-        // Stop speech recognition
+    const stopSpeechRecognition = () => {
         if (recognitionRef.current) {
             try {
-                recognitionRef.current.stop();
-                console.log('Speech recognition stopped');
+                if (typeof recognitionRef.current.close === 'function') {
+                    recognitionRef.current.close();
+                    console.log('Speech recognition closed');
+                } else if (typeof recognitionRef.current.abort === 'function') {
+                    recognitionRef.current.abort();
+                    console.log('Speech recognition aborted');
+                } else {
+                    recognitionRef.current.stop();
+                    console.log('Speech recognition stopped');
+                }
             } catch (error) {
                 console.error('Error stopping speech recognition:', error);
             }
             recognitionRef.current = null;
         }
-        
-        // Stop media recorder if active
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        setIsRecordingLocal(false);
+        updateInterview({ isRecording: false });
+    };
+
+    const registerStream = (stream) => {
+        if (!stream) return;
+        activeStreamsRef.current.add(stream);
+    };
+
+    const stopAllStreams = () => {
+        activeStreamsRef.current.forEach((stream) => {
             try {
-                mediaRecorderRef.current.stop();
-                console.log('MediaRecorder stopped');
+                stream.getTracks().forEach((track) => {
+                    try {
+                        track.stop();
+                    } catch (error) {
+                        console.warn('Error stopping track:', error);
+                    }
+                });
             } catch (error) {
-                console.error('Error stopping mediaRecorder:', error);
+                console.warn('Error stopping stream:', error);
             }
-            mediaRecorderRef.current = null;
+        });
+        activeStreamsRef.current.clear();
+    };
+
+    const forceStopMediaTracks = () => {
+        if (!mediaStreamRef.current) {
+            stopAllStreams();
+            return;
         }
-        
-        // Stop all audio tracks
+
+        try {
+            mediaStreamRef.current.getTracks().forEach((track) => {
+                try {
+                    track.stop();
+                } catch (error) {
+                    console.warn('Error stopping track:', error);
+                }
+            });
+        } finally {
+            mediaStreamRef.current = null;
+        }
+
+        if (recordingPreviewRef.current) {
+            recordingPreviewRef.current.srcObject = null;
+        }
+
+        stopAllStreams();
+    };
+
+    const stopSessionRecording = async ({ clearChunks = false } = {}) => {
+        const recorder = mediaRecorderRef.current;
+        if (recorder && recorder.state === 'recording') {
+            try {
+                recorder.requestData();
+            } catch (error) {
+                console.warn('MediaRecorder requestData failed:', error);
+            }
+        }
+
+        if (recorder && recorder.state === 'recording') {
+            await new Promise((resolve) => {
+                const onStopHandler = () => {
+                    recorder.removeEventListener('stop', onStopHandler);
+                    resolve();
+                };
+                recorder.addEventListener('stop', onStopHandler);
+                try {
+                    recorder.stop();
+                } catch (error) {
+                    console.error('Error stopping MediaRecorder:', error);
+                    resolve();
+                }
+            });
+        }
+
         if (mediaStreamRef.current) {
             mediaStreamRef.current.getTracks().forEach(track => track.stop());
             mediaStreamRef.current = null;
         }
-        
-        // Cleanup video preview
+
+        mediaRecorderRef.current = null;
+
         if (recordingPreviewRef.current) {
             recordingPreviewRef.current.srcObject = null;
         }
-        
-        audioChunksRef.current = [];
+
+        setIsSessionRecording(false);
+
+        if (clearChunks) {
+            sessionRecordingChunksRef.current = [];
+        }
+    };
+
+    const stopAllRecording = () => {
+        console.log('stopAllRecording called');
+        allowRecordingRef.current = false;
+        setSessionRecordingEnabled(false);
+        stopSpeechRecognition();
+        forceStopMediaTracks();
+        stopSessionRecording({ clearChunks: true });
         setIsRecordingLocal(false);
         updateInterview({ isRecording: false });
+    };
+
+    const startSessionRecording = async () => {
+        if (mediaRecorderRef.current || isSessionRecording) {
+            return;
+        }
+
+        try {
+            console.log('Starting full-session recording...');
+            const isVideoMode = interview.recordingMode === 'video';
+            const constraints = {
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                }
+            };
+
+            if (isVideoMode) {
+                constraints.video = { facingMode: 'user' };
+            }
+
+            let stream;
+            try {
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
+            } catch (error) {
+                if (isVideoMode && error.name === 'NotFoundError') {
+                    console.warn('[📹 VIDEO] Camera not found, falling back to audio only');
+                    stream = await navigator.mediaDevices.getUserMedia({ audio: constraints.audio });
+                    updateInterview({ recordingMode: 'audio' });
+                } else {
+                    throw error;
+                }
+            }
+            mediaStreamRef.current = stream;
+            registerStream(stream);
+            sessionRecordingChunksRef.current = [];
+
+            if (isVideoMode && recordingPreviewRef.current) {
+                recordingPreviewRef.current.srcObject = stream;
+            }
+
+            let mimeType = '';
+            if (isVideoMode) {
+                const videoMimeTypes = [
+                    'video/webm;codecs=vp9,opus',
+                    'video/webm;codecs=vp8,opus',
+                    'video/webm'
+                ];
+                for (const type of videoMimeTypes) {
+                    if (MediaRecorder.isTypeSupported(type)) {
+                        mimeType = type;
+                        break;
+                    }
+                }
+            } else {
+                mimeType = 'audio/webm';
+                if (!MediaRecorder.isTypeSupported(mimeType)) {
+                    mimeType = 'audio/mp4';
+                }
+                if (!MediaRecorder.isTypeSupported(mimeType)) {
+                    mimeType = '';
+                }
+            }
+
+            const mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    sessionRecordingChunksRef.current.push(event.data);
+                }
+            };
+
+            mediaRecorder.onstop = () => {
+                console.log('Session recording stopped, chunks:', sessionRecordingChunksRef.current.length);
+            };
+
+            mediaRecorder.onerror = (event) => {
+                console.error('MediaRecorder error:', event.error);
+                setIsSessionRecording(false);
+            };
+
+            mediaRecorderRef.current = mediaRecorder;
+            mediaRecorder.start();
+            setIsSessionRecording(true);
+        } catch (error) {
+            console.error('Error starting session recording:', error);
+            alert('Failed to start recording. Please check your camera and microphone permissions.');
+        }
+    };
+
+    const finalizeSessionRecording = async () => {
+        if (mediaRecorderRef.current) {
+            await stopSessionRecording();
+        }
+
+        if (sessionRecordingChunksRef.current.length === 0) {
+            return null;
+        }
+
+        const mimeType = interview.recordingMode === 'video' ? 'video/webm' : 'audio/webm';
+        const mediaBlob = new Blob(sessionRecordingChunksRef.current, { type: mimeType });
+        sessionRecordingChunksRef.current = [];
+
+        const recordingUrl = await api.uploadSessionRecording(interview.sessionId, mediaBlob, interview.recordingMode);
+        if (recordingUrl) {
+            updateInterview({ sessionRecordingUrl: recordingUrl });
+        }
+        return recordingUrl;
     };
 
     // Keep panelStateRef in sync with panelState
@@ -112,29 +309,29 @@ const InterviewScreen = () => {
         panelStateRef.current = panelState;
     }, [panelState]);
 
-    // Start/stop recording strictly based on listening state
+    // Start/stop speech recognition based on listening state
     useEffect(() => {
-        let isMounted = true;
-        
-        const handleRecording = async () => {
-            if (panelState === 'listening') {
-                try {
-                    await startRecording();
-                } catch (error) {
-                    console.error('Error in startRecording:', error);
-                    // Don't change state here - let the UI handle the error
-                }
-            } else {
-                stopAllRecording();
-            }
-        };
-
-        handleRecording();
-
-        return () => {
-            isMounted = false;
-        };
+        if (panelState === 'listening') {
+            startRecording().catch((error) => {
+                console.error('Error in startRecording:', error);
+            });
+        } else {
+            stopSpeechRecognition();
+        }
     }, [panelState]);
+
+    useEffect(() => {
+        if (!interview.sessionId || !sessionRecordingEnabled || isSessionRecording || mediaRecorderRef.current) {
+            return;
+        }
+        startSessionRecording();
+    }, [interview.sessionId, interview.recordingMode, isSessionRecording, sessionRecordingEnabled]);
+
+    useEffect(() => {
+        if (interview.sessionId) {
+            setSessionRecordingEnabled(true);
+        }
+    }, [interview.sessionId]);
 
     // Cleanup: stop recording when component unmounts
     useEffect(() => {
@@ -145,8 +342,23 @@ const InterviewScreen = () => {
             });
         }
 
+        const handlePageHide = () => {
+            stopAllRecording();
+        };
+
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'hidden') {
+                stopAllRecording();
+            }
+        };
+
+        window.addEventListener('pagehide', handlePageHide);
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
         return () => {
             console.log('InterviewScreen unmounting, stopping recording');
+            window.removeEventListener('pagehide', handlePageHide);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
             stopAllRecording();
         };
     }, []); // Empty dependencies - run only on mount/unmount
@@ -158,170 +370,17 @@ const InterviewScreen = () => {
         }
 
         // Prevent starting if already recording
-        if (isRecordingLocal && mediaRecorderRef.current) {
+        if (isRecordingLocal && recognitionRef.current) {
             console.log('Already recording, skipping');
             return;
         }
 
         try {
             allowRecordingRef.current = true;
-            console.log('Requesting media access and starting recording + STT...');
-            console.log('Recording mode:', interview.recordingMode);
-            
-            // Request microphone (and camera if video mode)
-            const isVideoMode = interview.recordingMode === 'video';
-            const constraints = {
-                audio: {
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true
-                }
-            };
-            
-            if (isVideoMode) {
-                // Use simple video constraints - just ask for any video
-                // Avoid strict constraints that might cause stream to stop
-                constraints.video = {
-                    facingMode: 'user'
-                };
-                console.log('Video mode: requesting camera and microphone with basic constraints');
-            } else {
-                console.log('Audio mode: requesting microphone only');
-            }
-            
-            let stream;
-            try {
-                stream = await navigator.mediaDevices.getUserMedia(constraints);
-                console.log(`✓ Media access granted (${isVideoMode ? 'video+audio' : 'audio only'})`);
-            } catch (error) {
-                console.error(`✗ Failed to get media stream:`, error.name, error.message);
-                if (isVideoMode && error.name === 'NotFoundError') {
-                    console.warn('[📹 VIDEO] Camera not found, falling back to audio only');
-                    // Fallback to audio only
-                    const audioConstraints = { audio: constraints.audio };
-                    stream = await navigator.mediaDevices.getUserMedia(audioConstraints);
-                    updateInterview({ recordingMode: 'audio' });
-                } else {
-                    throw error;
-                }
-            }
-
-            console.log('Media access granted');
-            mediaStreamRef.current = stream;
-            audioChunksRef.current = [];
-            
-            // Monitor video track status in video mode
-            if (isVideoMode) {
-                const videoTrack = stream.getVideoTracks()[0];
-                const audioTrack = stream.getAudioTracks()[0];
-                
-                if (videoTrack) {
-                    console.log('[📹 VIDEO] Video track ready, label:', videoTrack.label, 'state:', videoTrack.readyState);
-                    
-                    videoTrack.onended = () => {
-                        console.warn('[📹 VIDEO] ⚠️ Video track ended unexpectedly!');
-                        setIsRecordingLocal(false);
-                        setPanelState('listening');
-                    };
-                    
-                    // Monitor track settings changes
-                    videoTrack.onmute = () => {
-                        console.warn('[📹 VIDEO] Video track muted');
-                    };
-                    videoTrack.onunmute = () => {
-                        console.log('[📹 VIDEO] Video track unmuted');
-                    };
-                }
-                
-                if (audioTrack) {
-                    console.log('[🎤 AUDIO] Audio track ready, label:', audioTrack.label, 'state:', audioTrack.readyState);
-                }
-            }
-            
-            // Attach video preview if in video mode
-            if (isVideoMode && recordingPreviewRef.current) {
-                recordingPreviewRef.current.srcObject = stream;
-                console.log('[📹 VIDEO] Preview stream attached');
-            }
             finalTranscriptRef.current = '';
             interimTranscriptRef.current = '';
-
             // ======================
-            // 1. START MEDIA RECORDING (AUDIO OR VIDEO)
-            // ======================
-            let mimeType;
-            
-            if (isVideoMode) {
-                // Video mode: prefer webm with VP9 or VP8 + Opus
-                const videoMimeTypes = [
-                    'video/webm;codecs=vp9,opus',
-                    'video/webm;codecs=vp8,opus',
-                    'video/webm'
-                ];
-                
-                for (const type of videoMimeTypes) {
-                    if (MediaRecorder.isTypeSupported(type)) {
-                        mimeType = type;
-                        break;
-                    }
-                }
-                
-                if (!mimeType) {
-                    console.warn('No supported video MIME types, using default');
-                    mimeType = '';
-                }
-                console.log('Video recording MIME type:', mimeType || 'default');
-            } else {
-                // Audio mode: prefer webm with opus
-                mimeType = 'audio/webm';
-                if (!MediaRecorder.isTypeSupported(mimeType)) {
-                    console.warn('audio/webm not supported, falling back to audio/mp4');
-                    mimeType = 'audio/mp4';
-                }
-                if (!MediaRecorder.isTypeSupported(mimeType)) {
-                    console.warn('audio/mp4 not supported, using default');
-                    mimeType = '';
-                }
-                console.log('Audio recording MIME type:', mimeType || 'default');
-            }
-
-            const mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
-            console.log('MediaRecorder created');
-
-            mediaRecorder.ondataavailable = (event) => {
-                if (event.data.size > 0) {
-                    audioChunksRef.current.push(event.data);
-                    console.log(`${isVideoMode ? 'Video' : 'Audio'} chunk received:`, event.data.size);
-                }
-            };
-
-            mediaRecorder.onstop = () => {
-                console.log(`${isVideoMode ? 'Video' : 'Audio'} recording stopped, chunks:`, audioChunksRef.current.length);
-                // Don't stop tracks here - let stopAllRecording handle cleanup
-                // This prevents the video preview from stopping prematurely
-            };
-
-            mediaRecorder.onerror = (event) => {
-                console.error('MediaRecorder error:', event.error);
-                // Don't stop tracks immediately - let error handler clean up properly
-                updateInterview({ isRecording: false });
-                setIsRecordingLocal(false);
-            };
-
-            mediaRecorderRef.current = mediaRecorder;
-            console.log(`Starting ${isVideoMode ? 'video' : 'audio'} recording...`);
-            mediaRecorder.start();
-
-            // Auto-stop after 30 seconds (max answer duration)
-            setTimeout(() => {
-                if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-                    console.log('Auto-stopping recording after 30s timeout');
-                    mediaRecorderRef.current.stop();
-                }
-            }, 30000);
-
-            // ======================
-            // 2. START SPEECH RECOGNITION (STT)
+            // START SPEECH RECOGNITION (STT)
             // ======================
             const recognition = createSpeechRecognizer(false); // Use Azure Speech API (false = Azure)
             
@@ -371,115 +430,28 @@ const InterviewScreen = () => {
             recognition.start();
 
         } catch (error) {
-            console.error('Error starting recording/STT:', error);
-            console.error('Error name:', error.name);
-            console.error('Error message:', error.message);
-            
+            console.error('Error starting speech recognition:', error);
             setIsRecordingLocal(false);
             updateInterview({ isRecording: false });
-            
-            if (error.name === 'NotAllowedError') {
-                alert('Microphone access denied. Please allow microphone access in your browser settings and try again.');
-            } else if (error.name === 'NotFoundError') {
-                alert('No microphone found. Please check your audio device is connected.');
-            } else if (error.name === 'NotReadableError') {
-                alert('Microphone is already in use by another application. Please close other apps and try again.');
-            } else {
-                alert('Failed to start recording/STT: ' + error.message);
-            }
+            alert('Failed to start speech recognition. Please check your microphone permissions.');
         }
     };
 
     const handleDoneSpeaking = async () => {
-        console.log('User clicked Done Speaking, stopping recording/STT and uploading');
+        console.log('User clicked Done Speaking, stopping STT and submitting');
         allowRecordingRef.current = false;
 
-        // Stop speech recognition (synchronous)
-        if (recognitionRef.current) {
-            try {
-                recognitionRef.current.stop();
-                console.log('Speech recognition stopped');
-            } catch (err) {
-                console.error('Error stopping speech recognition:', err);
-            }
-            recognitionRef.current = null;
-        }
-
-        // Stop media recorder and WAIT for it to finish collecting audio chunks
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-            const mediaRecorder = mediaRecorderRef.current;
-            
-            // Wait for the 'stop' event which fires after all chunks are collected
-            return new Promise((resolve) => {
-                const onStopHandler = async () => {
-                    mediaRecorder.removeEventListener('stop', onStopHandler);
-                    console.log(`MediaRecorder stopped, collected ${audioChunksRef.current.length} chunks`);
-                    
-                    // Now proceed with the submission (chunks are ready)
-                    await proceedWithSubmission();
-                    resolve();
-                };
-                
-                mediaRecorder.addEventListener('stop', onStopHandler);
-                
-                try {
-                    console.log('Stopping MediaRecorder...');
-                    mediaRecorder.stop();
-                } catch (err) {
-                    console.error('Error stopping mediaRecorder:', err);
-                    // Run handler anyway to proceed
-                    onStopHandler();
-                }
-            });
-        } else {
-            // Not recording, proceed immediately
-            await proceedWithSubmission();
-        }
+        stopSpeechRecognition();
+        await proceedWithSubmission();
 
         async function proceedWithSubmission() {
-            // Stop all audio tracks
-            if (mediaStreamRef.current) {
-                mediaStreamRef.current.getTracks().forEach(track => track.stop());
-                mediaStreamRef.current = null;
-            }
-
-            mediaRecorderRef.current = null;
-
             // Get transcript from STT
             const transcriptToSend = (finalTranscriptRef.current + interimTranscriptRef.current).trim();
             console.log('Transcript to send:', transcriptToSend);
-
-            // Create media blob from chunks (audio or video depending on mode)
-            let mediaBlob = null;
-            if (audioChunksRef.current.length > 0) {
-                // Determine MIME type based on recording mode
-                const mimeType = interview.recordingMode === 'video' ? 'video/webm' : 'audio/webm';
-                mediaBlob = new Blob(audioChunksRef.current, { type: mimeType });
-                const sizeKB = (mediaBlob.size / 1024).toFixed(2);
-                console.log(`[${interview.recordingMode === 'video' ? '📹 VIDEO' : '🎤 AUDIO'}] Blob created: ${sizeKB} KB (${mimeType})`);
-            } else {
-                console.warn('No media chunks collected');
-            }
-            
-            audioChunksRef.current = [];
             setIsRecordingLocal(false);
 
-            // Upload recording to blob storage if we have media
-            console.log(`[${interview.recordingMode === 'video' ? '📹 VIDEO' : '🎤 AUDIO'}] Uploading to blob storage...`);
-            let recordingBlobUrl = null;
-            if (mediaBlob && mediaBlob.size > 0) {
-                try {
-                    recordingBlobUrl = await api.uploadRecording(interview.sessionId, mediaBlob, interview.questionNumber, interview.recordingMode);
-                    console.log(`[${interview.recordingMode === 'video' ? '📹 VIDEO' : '🎤 AUDIO'}] ✓ Uploaded successfully! Blob URL:`, recordingBlobUrl);
-                } catch (error) {
-                    console.error(`[${interview.recordingMode === 'video' ? '📹 VIDEO' : '🎤 AUDIO'}] ✗ Upload failed:`, error);
-                    // Don't fail - proceed with transcript anyway
-                }
-            }
-
-            // Submit answer with BOTH transcript AND recording blob URL
             console.log(`[${interview.recordingMode === 'video' ? '📹 VIDEO' : '🎤 AUDIO'}] Submitting answer for Q${interview.questionNumber}`);
-            submitAnswer(transcriptToSend, false, recordingBlobUrl);
+            submitAnswer(transcriptToSend, false, null);
         }
     };
 
@@ -607,7 +579,6 @@ const InterviewScreen = () => {
                 setHint(null); // Clear hint for next question
                 
                 // Reset audio chunks and transcript refs for new question
-                audioChunksRef.current = [];
                 finalTranscriptRef.current = '';
                 interimTranscriptRef.current = '';
                 allowRecordingRef.current = false; // Disable recording until speech finishes
@@ -621,21 +592,6 @@ const InterviewScreen = () => {
                         console.log('Speech recognition already stopped');
                     }
                     recognitionRef.current = null;
-                }
-                
-                // Stop media recorder and cleanup audio
-                if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-                    try {
-                        mediaRecorderRef.current.stop();
-                    } catch (e) {
-                        console.log('MediaRecorder already stopped');
-                    }
-                }
-                mediaRecorderRef.current = null;
-                
-                if (mediaStreamRef.current) {
-                    mediaStreamRef.current.getTracks().forEach(track => track.stop());
-                    mediaStreamRef.current = null;
                 }
                 
                 updateInterview({
@@ -660,6 +616,9 @@ const InterviewScreen = () => {
                     questionWiseFeedback: currentFeedback,
                 });
                 console.log('Updated interview context with questionWiseFeedback, array length:', currentFeedback?.length);
+                setSessionRecordingEnabled(false);
+                await finalizeSessionRecording();
+                stopAllRecording();
                 navigateTo('results');
             }
         } catch (error) {
@@ -678,8 +637,8 @@ const InterviewScreen = () => {
         
         setIsSubmitting(true);
         try {
-            // Stop any active recording immediately
-            stopAllRecording();
+            // Stop speech recognition immediately
+            stopSpeechRecognition();
             
             const result = await api.continue(interview.sessionId);
             console.log('Proceeded after feedback, response:', result);
@@ -731,6 +690,44 @@ const InterviewScreen = () => {
         }
     };
 
+    const handlePreviewPointerDown = (event) => {
+        const container = previewContainerRef.current;
+        if (!container) return;
+
+        const rect = container.getBoundingClientRect();
+        previewDragRef.current.isDragging = true;
+        previewDragRef.current.offsetX = event.clientX - rect.left;
+        previewDragRef.current.offsetY = event.clientY - rect.top;
+
+        container.setPointerCapture(event.pointerId);
+    };
+
+    const handlePreviewPointerMove = (event) => {
+        if (!previewDragRef.current.isDragging) return;
+
+        const container = previewContainerRef.current;
+        const width = container?.offsetWidth || 0;
+        const height = container?.offsetHeight || 0;
+        const padding = 12;
+
+        const maxX = Math.max(padding, window.innerWidth - width - padding);
+        const maxY = Math.max(padding, window.innerHeight - height - padding);
+
+        const nextX = Math.min(Math.max(event.clientX - previewDragRef.current.offsetX, padding), maxX);
+        const nextY = Math.min(Math.max(event.clientY - previewDragRef.current.offsetY, padding), maxY);
+
+        setPreviewPosition({ x: nextX, y: nextY });
+    };
+
+    const handlePreviewPointerUp = (event) => {
+        if (!previewDragRef.current.isDragging) return;
+        previewDragRef.current.isDragging = false;
+        const container = previewContainerRef.current;
+        if (container) {
+            container.releasePointerCapture(event.pointerId);
+        }
+    };
+
     const progressPercentage = interview.totalQuestions > 0 
         ? (interview.questionNumber / interview.totalQuestions) * 100 
         : 0;
@@ -744,21 +741,7 @@ const InterviewScreen = () => {
         console.log('Skipping question');
         
         // Stop speech recognition
-        if (recognitionRef.current) {
-            recognitionRef.current.stop();
-            recognitionRef.current = null;
-        }
-        
-        // Stop recording if active
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-            mediaRecorderRef.current.stop();
-        }
-        // Cleanup audio stream
-        if (mediaStreamRef.current) {
-            mediaStreamRef.current.getTracks().forEach(track => track.stop());
-            mediaStreamRef.current = null;
-        }
-        audioChunksRef.current = [];
+        stopSpeechRecognition();
         finalTranscriptRef.current = '';
         interimTranscriptRef.current = '';
         
@@ -770,44 +753,31 @@ const InterviewScreen = () => {
         await submitAnswer('', true);
     };
 
-    const endSession = () => {
+    const endSession = async () => {
         console.log('Ending session early');
         console.log('Current questionWiseFeedback:', questionWiseFeedback);
         setEndingSession(true);
+        setSessionRecordingEnabled(false);
         
-        // Stop speech recognition
-        if (recognitionRef.current) {
-            recognitionRef.current.stop();
-            recognitionRef.current = null;
+        stopSpeechRecognition();
+
+        try {
+            await finalizeSessionRecording();
+            stopAllRecording();
+            const result = await api.endSession(interview.sessionId, questionWiseFeedback);
+            console.log('Session ended, response:', result);
+            if (result.final && result.summary) {
+                updateInterview({
+                    summary: result.summary,
+                    questionWiseFeedback: questionWiseFeedback
+                });
+            }
+            navigateTo('results');
+        } catch (error) {
+            console.error('Error ending session:', error);
+            setEndingSession(false);
+            alert('Failed to end session. Please try again.');
         }
-        
-        // Stop recording if active
-        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
-            mediaRecorderRef.current.stop();
-        }
-        // Cleanup audio stream
-        if (mediaStreamRef.current) {
-            mediaStreamRef.current.getTracks().forEach(track => track.stop());
-            mediaStreamRef.current = null;
-        }
-        
-        // Call backend to end session and get feedback
-        api.endSession(interview.sessionId, questionWiseFeedback)
-            .then((result) => {
-                console.log('Session ended, response:', result);
-                if (result.final && result.summary) {
-                    updateInterview({ 
-                        summary: result.summary,
-                        questionWiseFeedback: questionWiseFeedback
-                    });
-                }
-                navigateTo('results');
-            })
-            .catch((error) => {
-                console.error('Error ending session:', error);
-                setEndingSession(false);
-                alert('Failed to end session. Please try again.');
-            });
     };
 
     const handleLogoClick = () => {
@@ -841,8 +811,56 @@ const InterviewScreen = () => {
 
     return (
         <div className="bg-background-light dark:bg-background-dark text-[#121617] dark:text-[#f0f0f0] font-display h-full flex flex-col transition-colors duration-300">
+            {endingSession && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[#0d191b]/90 text-white">
+                    <div className="flex flex-col items-center gap-4">
+                        <div className="relative w-20 h-20">
+                            <div className="absolute inset-0 rounded-full border-4 border-white/20"></div>
+                            <div className="absolute inset-0 rounded-full border-4 border-t-white border-r-transparent border-b-transparent border-l-transparent animate-spin"></div>
+                            <div className="absolute inset-0 flex items-center justify-center">
+                                <span className="material-symbols-outlined text-3xl">done_all</span>
+                            </div>
+                        </div>
+                        <p className="text-lg font-semibold tracking-wide">Wrapping up your interview...</p>
+                        <p className="text-sm text-white/70">Finalizing your results</p>
+                    </div>
+                </div>
+            )}
             {/* Main Content */}
             <main className="flex-grow flex flex-col items-center justify-center p-6 sm:p-10 relative">
+                {interview.recordingMode === 'video' && isSessionRecording && (
+                    <div
+                        ref={previewContainerRef}
+                        onPointerMove={handlePreviewPointerMove}
+                        onPointerUp={handlePreviewPointerUp}
+                        onPointerCancel={handlePreviewPointerUp}
+                        className="fixed z-50 w-56 md:w-64 rounded-xl shadow-xl border border-primary/30 bg-white/90 dark:bg-[#1e2126]/90 backdrop-blur-lg cursor-move"
+                        style={{
+                            left: `${previewPosition.x}px`,
+                            top: `${previewPosition.y}px`,
+                            touchAction: 'none',
+                            userSelect: 'none'
+                        }}
+                    >
+                        <div
+                            onPointerDown={handlePreviewPointerDown}
+                            className="flex items-center justify-between px-3 py-2 border-b border-primary/20 text-xs font-bold uppercase tracking-wider text-primary cursor-move"
+                        >
+                            <span>Live Recording</span>
+                            <span className="flex items-center gap-1 text-red-600">
+                                <span className="w-2 h-2 rounded-full bg-red-600 animate-pulse"></span>
+                                REC
+                            </span>
+                        </div>
+                        <video
+                            ref={recordingPreviewRef}
+                            autoPlay
+                            muted
+                            playsInline
+                            className="w-full rounded-b-xl bg-black pointer-events-none"
+                        />
+                    </div>
+                )}
                 {panelState === 'coach-feedback' && (
                     <div className="w-full max-w-5xl">
                         <div className="flex flex-col items-center w-full text-center mb-8">
@@ -1012,7 +1030,6 @@ const InterviewScreen = () => {
                                 transcript={transcript} 
                                 setTranscript={setTranscript}
                                 recordingMode={interview.recordingMode}
-                                videoPreviewRef={recordingPreviewRef}
                             />
                         )}
                         {panelState === 'evaluating' && (
@@ -1137,43 +1154,29 @@ const GeneratingPanel = ({ isLoadingResults }) => (
 );
 
 // Listening Panel Component
-const ListeningPanel = ({ onDone, transcript, setTranscript, recordingMode = 'audio', videoPreviewRef = null }) => (
+const ListeningPanel = ({ onDone, transcript, setTranscript, recordingMode = 'audio' }) => (
     <>
-        {recordingMode === 'video' && videoPreviewRef ? (
-            // Video mode: show video preview
-            <div className="flex-1 flex flex-col items-center justify-center w-full mb-4">
-                <div className="relative w-full max-w-sm">
-                    {/* Video Preview */}
-                    <video 
-                        ref={videoPreviewRef} 
-                        autoPlay 
-                        muted 
-                        className="w-full rounded-lg bg-black shadow-lg border-2 border-primary/50"
-                        style={{maxHeight: '300px'}}
-                    />
-                    {/* Recording Indicator Overlay */}
-                    <div className="absolute top-3 right-3 flex items-center gap-2 bg-red-600 text-white px-3 py-1.5 rounded-full shadow-lg animate-pulse">
-                        <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
-                        <span className="text-xs font-bold">REC</span>
+        <div className="flex-1 flex flex-col items-center justify-center w-full">
+            {recordingMode === 'video' ? (
+                <>
+                    <span className="material-symbols-outlined text-5xl text-primary mb-3">videocam</span>
+                    <p className="text-primary font-bold text-lg md:text-xl animate-pulse">Recording Video...</p>
+                    <p className="text-gray-400 dark:text-gray-500 text-sm md:text-base mt-2">Speak clearly and look at the camera</p>
+                </>
+            ) : (
+                <>
+                    <div aria-hidden="true" className="h-24 flex items-center justify-center gap-1.5 mb-3">
+                        <div className="w-2 bg-[#2f86de]/80 dark:bg-[#2f86de]/90 rounded-full h-8 wave-bar animate-[wave_0.8s_ease-in-out_infinite]" style={{animationDelay: '0.1s'}}></div>
+                        <div className="w-2 bg-[#2f86de]/80 dark:bg-[#2f86de]/90 rounded-full h-14 wave-bar animate-[wave_1.1s_ease-in-out_infinite]" style={{animationDelay: '0.2s'}}></div>
+                        <div className="w-2 bg-[#2f86de]/80 dark:bg-[#2f86de]/90 rounded-full h-10 wave-bar animate-[wave_1.3s_ease-in-out_infinite]" style={{animationDelay: '0.3s'}}></div>
+                        <div className="w-2 bg-[#2f86de]/80 dark:bg-[#2f86de]/90 rounded-full h-16 wave-bar animate-[wave_0.9s_ease-in-out_infinite]" style={{animationDelay: '0.1s'}}></div>
+                        <div className="w-2 bg-[#2f86de]/80 dark:bg-[#2f86de]/90 rounded-full h-6 wave-bar animate-[wave_1.2s_ease-in-out_infinite]" style={{animationDelay: '0.4s'}}></div>
                     </div>
-                </div>
-                <p className="text-primary font-bold text-lg mt-4 animate-pulse">Recording Video...</p>
-                <p className="text-gray-400 dark:text-gray-500 text-sm mt-2">Speak clearly and look at the camera</p>
-            </div>
-        ) : (
-            // Audio mode: show listening visualization
-            <div className="flex-1 flex flex-col items-center justify-center w-full">
-                <div aria-hidden="true" className="h-24 flex items-center justify-center gap-1.5 mb-3">
-                    <div className="w-2 bg-[#2f86de]/80 dark:bg-[#2f86de]/90 rounded-full h-8 wave-bar animate-[wave_0.8s_ease-in-out_infinite]" style={{animationDelay: '0.1s'}}></div>
-                    <div className="w-2 bg-[#2f86de]/80 dark:bg-[#2f86de]/90 rounded-full h-14 wave-bar animate-[wave_1.1s_ease-in-out_infinite]" style={{animationDelay: '0.2s'}}></div>
-                    <div className="w-2 bg-[#2f86de]/80 dark:bg-[#2f86de]/90 rounded-full h-10 wave-bar animate-[wave_1.3s_ease-in-out_infinite]" style={{animationDelay: '0.3s'}}></div>
-                    <div className="w-2 bg-[#2f86de]/80 dark:bg-[#2f86de]/90 rounded-full h-16 wave-bar animate-[wave_0.9s_ease-in-out_infinite]" style={{animationDelay: '0.1s'}}></div>
-                    <div className="w-2 bg-[#2f86de]/80 dark:bg-[#2f86de]/90 rounded-full h-6 wave-bar animate-[wave_1.2s_ease-in-out_infinite]" style={{animationDelay: '0.4s'}}></div>
-                </div>
-                <p className="text-primary font-bold text-lg md:text-xl animate-pulse">Listening...</p>
-                <p className="text-gray-400 dark:text-gray-500 text-sm md:text-base mt-2">Speak clearly</p>
-            </div>
-        )}
+                    <p className="text-primary font-bold text-lg md:text-xl animate-pulse">Listening...</p>
+                    <p className="text-gray-400 dark:text-gray-500 text-sm md:text-base mt-2">Speak clearly</p>
+                </>
+            )}
+        </div>
         
         <div className="w-full px-2 mb-2 text-xs text-gray-500 dark:text-gray-400 text-center italic">
             {recordingMode === 'video' ? 'Make sure your camera is visible' : 'Speak into your microphone'}

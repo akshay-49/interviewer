@@ -175,6 +175,34 @@ export const api = {
         }
     },
 
+    // Upload full interview recording to blob storage
+    async uploadSessionRecording(sessionId, mediaBlob, recordingMode = 'audio') {
+        try {
+            const formData = new FormData();
+            const timestamp = Date.now();
+            const extension = 'webm';
+            const filename = `session_${recordingMode}_${timestamp}.${extension}`;
+            formData.append('file', mediaBlob, filename);
+
+            const response = await fetch(`${API_BASE_URL}/recordings/upload-session?session_id=${sessionId}`, {
+                method: 'POST',
+                body: formData,
+                credentials: 'include'
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const data = await response.json();
+            console.log(`[${recordingMode === 'video' ? '📹 VIDEO' : '🎤 AUDIO'}] Session recording saved: ${filename}`, data);
+            return data.recording?.url || null;
+        } catch (error) {
+            console.error(`Failed to upload ${recordingMode} session recording:`, error);
+            return null;
+        }
+    },
+
     // Convert a direct blob URL to SAS URL if needed for access
     async getBlobUrlWithSAS(blobUrl) {
         if (!blobUrl) return null;

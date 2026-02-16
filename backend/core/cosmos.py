@@ -134,6 +134,7 @@ class SessionResult(BaseModel):
     overall_score: Optional[float] = None
     summary: Optional[Dict[str, Any]] = None  # what_went_well, areas_for_improvement, recommendations
     closing_audio_blob_url: Optional[str] = None
+    session_recording_blob_url: Optional[str] = None
     started_at: datetime = Field(default_factory=datetime.utcnow)
     completed_at: Optional[datetime] = None
     duration_seconds: Optional[int] = None
@@ -298,6 +299,22 @@ def update_session_closing_audio(session_id: str, audio_blob_url: str) -> bool:
         return True
     except Exception as e:
         print(f"Error updating session closing audio: {e}")
+        return False
+
+
+def update_session_recording_url(session_id: str, recording_blob_url: str) -> bool:
+    """Update session with full interview recording blob URL"""
+    try:
+        session = get_session(session_id)
+        if not session:
+            print(f"Session {session_id} not found")
+            return False
+
+        session['session_recording_blob_url'] = recording_blob_url
+        sessions_container.upsert_item(session)
+        return True
+    except Exception as e:
+        print(f"Error updating session recording URL: {e}")
         return False
 
 

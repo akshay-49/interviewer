@@ -12,19 +12,37 @@ export const useInterview = () => {
 };
 
 export const InterviewProvider = ({ children }) => {
-    // Check if we're coming back from Microsoft redirect
-    const getInitialScreen = () => {
-        if (typeof window !== 'undefined') {
-            const adminLoginInProgress = sessionStorage.getItem('adminLoginInProgress');
-            if (adminLoginInProgress) {
-                return 'admin-login';
-            }
+    const getInitialRoute = () => {
+        if (typeof window === 'undefined') {
+            return { screen: 'login', params: null };
         }
-        return 'login';
+
+        const path = window.location.pathname || '';
+        const adminLoginInProgress = sessionStorage.getItem('adminLoginInProgress');
+
+        if (adminLoginInProgress) {
+            return { screen: 'admin-login', params: null };
+        }
+
+        if (path === '/callback') {
+            return { screen: 'callback', params: null };
+        }
+
+        if (path === '/admin' || path === '/admin/' || path === '/admin-login') {
+            return { screen: 'admin-login', params: null };
+        }
+
+        const inviteMatch = path.match(/\/invite\/([^/]+)/);
+        if (inviteMatch) {
+            return { screen: 'invite-acceptance', params: { invite_code: inviteMatch[1] } };
+        }
+
+        return { screen: 'login', params: null };
     };
-    
-    const [currentScreen, setCurrentScreen] = useState(getInitialScreen);
-    const [currentParams, setCurrentParams] = useState(null);
+
+    const initialRoute = getInitialRoute();
+    const [currentScreen, setCurrentScreen] = useState(initialRoute.screen);
+    const [currentParams, setCurrentParams] = useState(initialRoute.params);
     const [backendAvailable, setBackendAvailable] = useState(false);
     const stopRecordingCallbackRef = useRef(null);
 
@@ -88,6 +106,7 @@ export const InterviewProvider = ({ children }) => {
         totalQuestions: 5,
         answers: [],
         summary: null,
+        sessionRecordingUrl: null,
         hintsUsed: 0,
         questionsSkipped: 0,
         questionWiseFeedback: [],
@@ -154,6 +173,7 @@ export const InterviewProvider = ({ children }) => {
             totalQuestions: 5,
             answers: [],
             summary: null,
+            sessionRecordingUrl: null,
             hintsUsed: 0,
             questionsSkipped: 0,
             questionWiseFeedback: [],

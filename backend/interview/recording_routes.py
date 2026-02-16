@@ -1,21 +1,16 @@
 """Recording management API endpoints"""
+from datetime import datetime
 from fastapi import APIRouter, File, UploadFile, HTTPException, status, Depends, Query
 from pydantic import BaseModel
 from typing import List, Optional
 import logging
 from backend.core.blob_storage import get_blob_manager
+from backend.core.cosmos import update_session_recording_url
 from backend.interview.session_manager import SessionManager
-from backend.auth.auth0_utils import get_current_user_from_cookie
+from backend.auth.auth0_utils import get_current_user, extract_user_info
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/recordings", tags=["Recordings"])
-
-
-# DEBUG: Simple test endpoint
-@router.get("/test")
-async def test_endpoint():
-    """Simple test endpoint to verify router is working"""
-    return {"status": "ok", "message": "recordings router is working"}
 
 
 class RecordingInfo(BaseModel):
@@ -36,21 +31,38 @@ class SessionRecordings(BaseModel):
 
 @router.post("/upload")
 async def upload_recording(
-    session_id: str = Query(...),
-    file: UploadFile = File(...)
+    session_id: str,
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user)
 ):
-    """Upload a recording for a session"""
-    logger.info(f"✅ Recording upload endpoint hit! session_id={session_id}, file={file.filename}")
+    """
+    Upload a recording for a session
     
+    Args:
+        session_id: Interview session ID
+        file: Audio file to upload
+    """
     try:
-        # Read file data
-        file_data = await file.read()
-        logger.info(f"📦 File read complete: {len(file_data)} bytes")
+        # Extract user info
+        user_info = extract_user_info(current_user)
+        user_id = user_info["user_sub"]
+        
+        # Check session exists
+        session = SessionManager.get_session(session_id)
+        if not session:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Session not found"
+            )
+        if session.get("user_id") != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized for this session"
+            )
         
         # Upload to blob storage
-        # For now, use a generic user_id since we removed auth
-        user_id = "anonymous"
         blob_manager = get_blob_manager()
+        file_data = await file.read()
         
         blob_url = blob_manager.upload_recording(
             user_id=user_id,
@@ -58,105 +70,130 @@ async def upload_recording(
             file_data=file_data,
             file_name=file.filename
         )
+        if not blob_url:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Recording upload failed"
+            )
+
+        sas_url = blob_manager.get_sas_url(
+            user_id=user_id,
+            session_id=session_id,
+            file_name=file.filename
+        )
         
-        logger.info(f"💾 Recording uploaded to blob storage: {blob_url}")
+        recording_info = {
+            "file_name": file.filename,
+            "size": len(file_data),
+            "url": sas_url or blob_url,
+            "uploaded_at": datetime.utcnow().isoformat()
+        }
         
-        # Generate SAS URL for 24-hour access (required for private storage account)
+        logger.info(f"Uploaded recording: {file.filename} for session {session_id}")
+        
+        return {
+            "message": "Recording uploaded successfully",
+            "recording": recording_info
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to upload recording: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@router.post("/upload-session")
+async def upload_session_recording(
+    session_id: str = Query(...),
+    file: UploadFile = File(...)
+):
+    """Upload a full-session recording and attach it to the session record"""
+    logger.info(f"✅ Session recording upload hit! session_id={session_id}, file={file.filename}")
+
+    try:
+        file_data = await file.read()
+        logger.info(f"📦 Session recording read: {len(file_data)} bytes")
+
+        user_id = "anonymous"
+        blob_manager = get_blob_manager()
+
+        blob_url = blob_manager.upload_recording(
+            user_id=user_id,
+            session_id=session_id,
+            file_data=file_data,
+            file_name=file.filename
+        )
+
         sas_url = blob_manager.get_sas_url(
             user_id=user_id,
             session_id=session_id,
             file_name=file.filename,
             expiry_hours=24
         )
-        
+
         if sas_url:
-            logger.info(f"🔗 Generated SAS URL for recording playback")
             response_url = sas_url
         else:
-            logger.warning(f"⚠️  SAS URL generation failed, falling back to direct blob URL (may fail if public access disabled)")
             response_url = blob_url
-        
+
+        if response_url:
+            update_session_recording_url(session_id, response_url)
+
         return {
-            "message": "Recording uploaded successfully",
+            "message": "Session recording uploaded successfully",
             "recording": {
                 "file_name": file.filename,
                 "size": len(file_data),
                 "url": response_url
             }
         }
-    
     except Exception as e:
-        logger.error(f"❌ Failed to upload recording: {e}", exc_info=True)
+        logger.error(f"❌ Failed to upload session recording: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to upload recording: {str(e)}"
-        )
-
-
-@router.get("/sas-url")
-async def get_recording_sas_url(
-    user_id: str = "anonymous",
-    session_id: str = Query(...),
-    file_name: str = Query(...)
-):
-    """
-    Generate a SAS URL for accessing a recording
-    
-    This endpoint creates temporary signed URLs for recordings stored in private blob storage.
-    Used when recordings need to be accessed from the browser.
-    """
-    try:
-        logger.info(f"🔑 Generating SAS URL for {user_id}/{session_id}/{file_name}")
-        
-        blob_manager = get_blob_manager()
-        sas_url = blob_manager.get_sas_url(
-            user_id=user_id,
-            session_id=session_id,
-            file_name=file_name,
-            expiry_hours=24
-        )
-        
-        if not sas_url:
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to generate SAS URL. AZURE_STORAGE_ACCOUNT_KEY may not be configured."
-            )
-        
-        return {
-            "message": "SAS URL generated successfully",
-            "sas_url": sas_url,
-            "expiry_hours": 24
-        }
-    
-    except Exception as e:
-        logger.error(f"❌ Failed to generate SAS URL: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"SAS URL generation failed: {str(e)}"
+            detail=f"Failed to upload session recording: {str(e)}"
         )
 
 
 @router.get("/session/{session_id}")
 async def get_session_recordings(
     session_id: str,
-    auth0_user: dict = Depends(get_current_user_from_cookie)
+    current_user: dict = Depends(get_current_user)
 ):
     """Get all recordings for a session"""
     try:
-        from backend.auth.auth0_utils import extract_user_info
-        user_info = extract_user_info(auth0_user)
-        user_id = user_info["auth0_sub"]
+        user_info = extract_user_info(current_user)
+        user_id = user_info["user_sub"]
         
-        session = SessionManager.get_session(user_id, session_id)
-        if not session:
+        session = SessionManager.get_session(session_id)
+        if session and session.get("user_id") != user_id:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Session not found"
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized for this session"
             )
-        
+
+        blob_manager = get_blob_manager()
+        prefix = f"{user_id}/{session_id}/"
+        recordings = []
+
+        for recording in blob_manager.list_user_recordings(user_id):
+            name = recording.get("name", "")
+            if not name.startswith(prefix):
+                continue
+            file_name = name.split("/")[-1]
+            recordings.append({
+                "session_id": session_id,
+                "file_name": file_name,
+                "size": recording.get("size", 0),
+                "url": blob_manager.get_sas_url(user_id, session_id, file_name)
+            })
+
         return {
             "session_id": session_id,
-            "recordings": session.recordings
+            "recordings": recordings
         }
     
     except HTTPException:
@@ -170,18 +207,18 @@ async def get_session_recordings(
 
 
 @router.get("/user")
-async def get_user_recordings(auth0_user: dict = Depends(get_current_user_from_cookie)):
+async def get_user_recordings(current_user: dict = Depends(get_current_user)):
     """Get all sessions and recordings for the current user"""
     try:
-        from backend.auth.auth0_utils import extract_user_info
-        user_info = extract_user_info(auth0_user)
-        user_id = user_info["auth0_sub"]
+        user_info = extract_user_info(current_user)
+        user_id = user_info["user_sub"]
         
-        sessions = SessionManager.get_user_sessions(user_id)
-        
+        blob_manager = get_blob_manager()
+        recordings = blob_manager.list_user_recordings(user_id)
+
         return {
             "user_id": user_id,
-            "sessions": sessions
+            "recordings": recordings
         }
     
     except Exception as e:
@@ -196,23 +233,16 @@ async def get_user_recordings(auth0_user: dict = Depends(get_current_user_from_c
 async def delete_recording(
     session_id: str,
     file_name: str,
-    auth0_user: dict = Depends(get_current_user_from_cookie)
+    current_user: dict = Depends(get_current_user)
 ):
     """Delete a specific recording"""
     try:
-        from backend.auth.auth0_utils import extract_user_info
-        user_info = extract_user_info(auth0_user)
-        user_id = user_info["auth0_sub"]
+        user_info = extract_user_info(current_user)
+        user_id = user_info["user_sub"]
         
         # Delete from blob storage
         blob_manager = get_blob_manager()
         blob_manager.delete_recording(user_id, session_id, file_name)
-        
-        # Update session
-        session = SessionManager.get_session(user_id, session_id)
-        if session:
-            session.recordings = [r for r in session.recordings if r["file_name"] != file_name]
-            SessionManager.update_session(user_id, session_id, {"recordings": session.recordings})
         
         return {"message": "Recording deleted successfully"}
     
@@ -222,6 +252,3 @@ async def delete_recording(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
-
-
-from datetime import datetime

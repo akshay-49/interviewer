@@ -22,52 +22,31 @@ import CallbackPage from './screens/CallbackPage';
 
 const ScreenManager = () => {
     const { currentScreen, currentParams, theme, toggleTheme, navigateTo, interview, resetInterview, user } = useInterview();
+    const adminLoginLock = typeof window !== 'undefined'
+        && (sessionStorage.getItem('adminLoginInProgress') || sessionStorage.getItem('adminLoginVerifying'));
 
     // Check for special routes in URL on mount
     useEffect(() => {
         const path = window.location.pathname;
         
-        // Check for admin login in progress (from Microsoft redirect) - check only once
+        // Preserve MSAL response fragment on root redirect
         const adminLoginInProgress = sessionStorage.getItem('adminLoginInProgress');
-        if (adminLoginInProgress && currentScreen !== 'admin-login' && currentScreen !== 'admin-dashboard') {
+        if (adminLoginInProgress) {
             const search = window.location.search || '';
             const hash = window.location.hash || '';
             const responseFragment = `${search}${hash}`;
             const hasMsalResponse = /[?#].*(code=|access_token=|id_token=|error=)/i.test(responseFragment);
 
             if (hasMsalResponse && path === '/') {
-                // Preserve the MSAL response fragment by doing a full redirect.
                 window.location.replace(`/admin-login${responseFragment}`);
-                return;
             }
-
-            console.log('Admin login in progress detected, routing to admin-login');
-            navigateTo('admin-login');
-            return;
-        }
-        
-        // Check for admin route
-        if ((path === '/admin' || path === '/admin/') && currentScreen !== 'admin-login' && currentScreen !== 'admin-dashboard') {
-            console.log('Admin path detected, routing to admin-login');
-            navigateTo('admin-login');
-            return;
-        }
-        
-        // Check for Auth0 callback route
-        if (path === '/callback') {
-            navigateTo('callback');
-            return;
-        }
-
-        // Check for invite code
-        const inviteMatch = path.match(/\/invite\/([^/]+)/);
-        if (inviteMatch) {
-            const inviteCode = inviteMatch[1];
-            navigateTo('invite-acceptance', { invite_code: inviteCode });
         }
     }, []);
 
     const renderScreen = () => {
+        if (adminLoginLock && currentScreen !== 'admin-dashboard') {
+            return <AdminLoginScreen />;
+        }
         // If on admin-login or admin-dashboard, show dashboard if already logged in as admin
         if ((currentScreen === 'admin-login' || currentScreen === 'login') && user?.isAdmin) {
             return <AdminDashboardScreen />;
@@ -139,7 +118,7 @@ const ScreenManager = () => {
     };
 
     // Check if we're on an auth screen
-    const isAuthScreen = ['login', 'signup', 'forgot-password', 'custom-login', 'callback'].includes(currentScreen);
+    const isAuthScreen = ['login', 'signup', 'forgot-password', 'custom-login', 'callback', 'admin-login'].includes(currentScreen);
     const isAdminScreen = ['admin-dashboard', 'invite-candidate', 'user-sessions'].includes(currentScreen);
     const isInviteScreen = currentScreen === 'invite-acceptance';
     const showProfileMenu = !['admin-login', 'admin-dashboard', 'invite-candidate'].includes(currentScreen);

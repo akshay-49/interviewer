@@ -50,6 +50,7 @@ class SessionDetail(BaseModel):
     questions_skipped: int
     summary: Optional[dict]
     closing_audio_blob_url: Optional[str]
+    session_recording_blob_url: Optional[str]
     question_wise_feedback: Optional[List[dict]]
     recording_mode: Optional[str] = 'audio'  # Track if interview was audio or video
     started_at: datetime
@@ -162,6 +163,7 @@ async def get_session_details(
             questions_skipped=session.get('questions_skipped', 0),
             summary=session.get('summary'),
             closing_audio_blob_url=session.get('closing_audio_blob_url'),
+            session_recording_blob_url=session.get('session_recording_blob_url'),
             question_wise_feedback=qwf,
             recording_mode=session.get('recording_mode', 'audio'),
             started_at=session.get('started_at', datetime.utcnow()),
@@ -235,6 +237,7 @@ async def get_session_details_admin(
             questions_skipped=session.get('questions_skipped', 0),
             summary=session.get('summary'),
             closing_audio_blob_url=session.get('closing_audio_blob_url'),
+            session_recording_blob_url=session.get('session_recording_blob_url'),
             question_wise_feedback=qwf,
             recording_mode=session.get('recording_mode', 'audio'),
             started_at=session.get('started_at', datetime.utcnow()),
@@ -282,6 +285,7 @@ async def get_session_details_public(
             questions_skipped=session.get('questions_skipped', 0),
             summary=session.get('summary'),
             closing_audio_blob_url=session.get('closing_audio_blob_url'),
+            session_recording_blob_url=session.get('session_recording_blob_url'),
             question_wise_feedback=qwf,
             recording_mode=session.get('recording_mode', 'audio'),
             started_at=session.get('started_at', datetime.utcnow()),

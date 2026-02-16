@@ -167,6 +167,12 @@ export class AzureSpeechRecognizer {
                 () => {
                     console.log('Recognition stopped');
                     this.isRecording = false;
+                    try {
+                        this.recognizer.close();
+                    } catch (closeError) {
+                        console.warn('Error closing recognizer:', closeError);
+                    }
+                    this.recognizer = null;
                 },
                 (err) => {
                     console.error('Error stopping recognition:', err);
@@ -175,6 +181,30 @@ export class AzureSpeechRecognizer {
             );
         } catch (error) {
             console.error('Error in stop():', error);
+            this.isRecording = false;
+        }
+    }
+
+    close() {
+        if (!this.recognizer) return;
+        try {
+            this.recognizer.stopContinuousRecognitionAsync(
+                () => {
+                    try {
+                        this.recognizer.close();
+                    } catch (closeError) {
+                        console.warn('Error closing recognizer:', closeError);
+                    }
+                    this.recognizer = null;
+                    this.isRecording = false;
+                },
+                (err) => {
+                    console.error('Error stopping recognition:', err);
+                    this.isRecording = false;
+                }
+            );
+        } catch (error) {
+            console.error('Error closing recognition:', error);
             this.isRecording = false;
         }
     }
