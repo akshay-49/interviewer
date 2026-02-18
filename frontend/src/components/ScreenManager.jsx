@@ -1,9 +1,7 @@
 import React, { useEffect } from 'react';
 import { useInterview } from '../context/InterviewContext';
 import ProfileMenu from './ProfileMenu';
-import LoginScreen from './screens/LoginScreen';
-import SignupScreen from './screens/SignupScreen';
-import ForgotPasswordScreen from './screens/ForgotPasswordScreen';
+import InviteEntranceScreen from './screens/InviteEntranceScreen';
 import WelcomeScreen from './screens/WelcomeScreen';
 import SetupScreen from './screens/SetupScreen';
 import ModeSelectionScreen from './screens/ModeSelectionScreen';
@@ -16,7 +14,6 @@ import AdminDashboardScreen from './screens/AdminDashboardScreen';
 import InviteCandidateScreen from './screens/InviteCandidateScreen';
 import UserSessionsScreen from './screens/UserSessionsScreen';
 import InviteAcceptanceScreen from './screens/InviteAcceptanceScreen';
-import CustomLoginScreen from './screens/CustomLoginScreen';
 import AdminLoginScreen from './screens/AdminLoginScreen';
 import CallbackPage from './screens/CallbackPage';
 
@@ -48,20 +45,14 @@ const ScreenManager = () => {
             return <AdminLoginScreen />;
         }
         // If on admin-login or admin-dashboard, show dashboard if already logged in as admin
-        if ((currentScreen === 'admin-login' || currentScreen === 'login') && user?.isAdmin) {
+        if ((currentScreen === 'admin-login' || currentScreen === 'invite-entrance') && user?.isAdmin) {
             return <AdminDashboardScreen />;
         }
         switch (currentScreen) {
-            case 'login':
-                return <LoginScreen />;
+            case 'invite-entrance':
+                return <InviteEntranceScreen />;
             case 'admin-login':
                 return <AdminLoginScreen />;
-            case 'custom-login':
-                return <CustomLoginScreen />;
-            case 'signup':
-                return <SignupScreen />;
-            case 'forgot-password':
-                return <ForgotPasswordScreen />;
             case 'welcome':
                 return <WelcomeScreen />;
             case 'setup':
@@ -89,7 +80,7 @@ const ScreenManager = () => {
             case 'callback':
                 return <CallbackPage />;
             default:
-                return <LoginScreen />;
+                return <InviteEntranceScreen />;
         }
     };
 
@@ -99,26 +90,26 @@ const ScreenManager = () => {
             const confirmed = window.confirm('Are you sure you want to exit the interview? Your progress will not be saved.');
             if (confirmed) {
                 resetInterview();
-                navigateTo('welcome');
+                navigateTo('invite-entrance');
             }
         } else if (currentScreen === 'setup' || currentScreen === 'results') {
             // Also confirm for other screens to prevent accidental navigation
             resetInterview();
-            navigateTo('welcome');
+            navigateTo('invite-entrance');
         } else if (currentScreen === 'report' && currentParams?.isAdmin) {
             // If viewing report from admin context, go back to admin dashboard
             navigateTo('admin-dashboard');
         } else if (currentScreen === 'user-sessions') {
             // User sessions screen is also admin, go to admin dashboard
             navigateTo('admin-dashboard');
-        } else if (currentScreen !== 'login' && currentScreen !== 'signup' && currentScreen !== 'forgot-password') {
-            // Already on welcome or other non-auth screen
-            navigateTo('welcome');
+        } else if (currentScreen !== 'invite-entrance' && !['admin-login', 'admin-dashboard', 'invite-candidate'].includes(currentScreen)) {
+            // Already on invite entrance or other non-auth screen
+            navigateTo('invite-entrance');
         }
     };
 
     // Check if we're on an auth screen
-    const isAuthScreen = ['login', 'signup', 'forgot-password', 'custom-login', 'callback', 'admin-login'].includes(currentScreen);
+    const isAuthScreen = ['invite-entrance', 'callback', 'admin-login'].includes(currentScreen);
     const isAdminScreen = ['admin-dashboard', 'invite-candidate', 'user-sessions'].includes(currentScreen);
     const isInviteScreen = currentScreen === 'invite-acceptance';
     const showProfileMenu = !['admin-login', 'admin-dashboard', 'invite-candidate'].includes(currentScreen);

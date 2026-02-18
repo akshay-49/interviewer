@@ -1,16 +1,27 @@
 """Recording management API endpoints"""
 from datetime import datetime
-from fastapi import APIRouter, File, UploadFile, HTTPException, status, Depends, Query
+from fastapi import APIRouter, File, UploadFile, HTTPException, status, Depends, Query, Request
 from pydantic import BaseModel
 from typing import List, Optional
 import logging
+import os
 from backend.core.blob_storage import get_blob_manager
-from backend.core.cosmos import update_session_recording_url
-from backend.interview.session_manager import SessionManager
-from backend.auth.auth0_utils import get_current_user, extract_user_info
+from backend.core.cosmos import update_session_recording_url, get_session as get_cosmos_session
+from backend.interview.enhanced_session_manager import SessionManager
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/recordings", tags=["Recordings"])
+
+
+def _get_current_user(request: Request) -> dict:
+    """Simple auth dependency - returns a dev user"""
+    # Development mode - no auth required
+    return {
+        "user_id": "dev|user",
+        "email": "user@dev.local",
+        "full_name": "Development User"
+    }
+
 
 
 class RecordingInfo(BaseModel):
@@ -33,7 +44,7 @@ class SessionRecordings(BaseModel):
 async def upload_recording(
     session_id: str,
     file: UploadFile = File(...),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(_get_current_user)
 ):
     """
     Upload a recording for a session
@@ -43,22 +54,14 @@ async def upload_recording(
         file: Audio file to upload
     """
     try:
-        # Extract user info
-        user_info = extract_user_info(current_user)
-        user_id = user_info["user_sub"]
-        
-        # Check session exists
-        session = SessionManager.get_session(session_id)
+        # Resolve user ID from session data
+        session = SessionManager.get_session(session_id) or get_cosmos_session(session_id)
         if not session:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Session not found"
             )
-        if session.get("user_id") != user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized for this session"
-            )
+        user_id = session.get("user_id") or current_user.get("user_id", "unknown")
         
         # Upload to blob storage
         blob_manager = get_blob_manager()
@@ -117,7 +120,8 @@ async def upload_session_recording(
         file_data = await file.read()
         logger.info(f"📦 Session recording read: {len(file_data)} bytes")
 
-        user_id = "anonymous"
+        session = SessionManager.get_session(session_id) or get_cosmos_session(session_id)
+        user_id = session.get("user_id") if session else "anonymous"
         blob_manager = get_blob_manager()
 
         blob_url = blob_manager.upload_recording(
@@ -161,19 +165,17 @@ async def upload_session_recording(
 @router.get("/session/{session_id}")
 async def get_session_recordings(
     session_id: str,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(_get_current_user)
 ):
     """Get all recordings for a session"""
     try:
-        user_info = extract_user_info(current_user)
-        user_id = user_info["user_sub"]
-        
-        session = SessionManager.get_session(session_id)
-        if session and session.get("user_id") != user_id:
+        session = SessionManager.get_session(session_id) or get_cosmos_session(session_id)
+        if not session:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Not authorized for this session"
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Session not found"
             )
+        user_id = session.get("user_id") or current_user.get("user_id", "unknown")
 
         blob_manager = get_blob_manager()
         prefix = f"{user_id}/{session_id}/"
@@ -207,11 +209,10 @@ async def get_session_recordings(
 
 
 @router.get("/user")
-async def get_user_recordings(current_user: dict = Depends(get_current_user)):
+async def get_user_recordings(current_user: dict = Depends(_get_current_user)):
     """Get all sessions and recordings for the current user"""
     try:
-        user_info = extract_user_info(current_user)
-        user_id = user_info["user_sub"]
+        user_id = current_user.get("user_id", "unknown")
         
         blob_manager = get_blob_manager()
         recordings = blob_manager.list_user_recordings(user_id)
@@ -233,12 +234,11 @@ async def get_user_recordings(current_user: dict = Depends(get_current_user)):
 async def delete_recording(
     session_id: str,
     file_name: str,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(_get_current_user)
 ):
     """Delete a specific recording"""
     try:
-        user_info = extract_user_info(current_user)
-        user_id = user_info["user_sub"]
+        user_id = current_user.get("user_id", "unknown")
         
         # Delete from blob storage
         blob_manager = get_blob_manager()

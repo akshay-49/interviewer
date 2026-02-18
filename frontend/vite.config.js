@@ -10,10 +10,8 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     envDir: path.resolve(__dirname, '..'),
     define: {
-      // Map root Auth0 variables to Vite-exposed keys
-      'import.meta.env.VITE_AUTH0_DOMAIN': JSON.stringify(env.AUTH0_DOMAIN || ''),
-      'import.meta.env.VITE_AUTH0_CLIENT_ID': JSON.stringify(env.AUTH0_CLIENT_ID || ''),
-      'import.meta.env.VITE_AUTH0_AUDIENCE': JSON.stringify(env.AUTH0_AUDIENCE || ''),
+      // Map environment variables to Vite-exposed keys
+      // Auth0 removed - using invite-only architecture with Cosmos DB
     },
   }
 })

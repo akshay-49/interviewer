@@ -167,6 +167,60 @@ const ReportScreen = () => {
         return { badge: badges[status], label: labels[status], status };
     };
 
+    const parseDateTime = (value) => {
+        if (!value) return null;
+        if (typeof value === 'string') {
+            const hasTimezone = /[zZ]|[+-]\d{2}:\d{2}$/.test(value);
+            if (!hasTimezone && value.includes('T')) {
+                return new Date(`${value}Z`);
+            }
+        }
+        return new Date(value);
+    };
+
+    const formatDateTime = (value) => {
+        const date = parseDateTime(value);
+        if (!date || isNaN(date.getTime())) return 'N/A';
+        return date.toLocaleString(undefined, {
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    };
+
+    const formatOffset = (seconds) => {
+        if (!Number.isFinite(seconds)) return 'N/A';
+        const total = Math.max(Math.floor(seconds), 0);
+        const hrs = Math.floor(total / 3600);
+        const mins = Math.floor((total % 3600) / 60);
+        const secs = total % 60;
+        const pad = (value) => String(value).padStart(2, '0');
+        return hrs > 0 ? `${hrs}:${pad(mins)}:${pad(secs)}` : `${mins}:${pad(secs)}`;
+    };
+
+    const getQuestionOffset = (question) => {
+        if (Number.isFinite(question?.question_start_offset_seconds)) {
+            return question.question_start_offset_seconds;
+        }
+        if (question?.question_started_at && sessionData?.started_at) {
+            const sessionStart = Date.parse(sessionData.started_at);
+            const questionStart = Date.parse(question.question_started_at);
+            if (Number.isFinite(sessionStart) && Number.isFinite(questionStart)) {
+                return Math.max((questionStart - sessionStart) / 1000, 0);
+            }
+        }
+        return null;
+    };
+
+    const handleJumpToOffset = (offsetSeconds) => {
+        const mediaEl = recordingMediaRef.current;
+        if (!mediaEl || !Number.isFinite(offsetSeconds)) return;
+        mediaEl.currentTime = Math.max(offsetSeconds, 0);
+        mediaEl.play().catch(() => {});
+    };
+
     if (loading) {
         return (
             <div className="bg-white dark:bg-slate-900 font-display h-full flex flex-col items-center justify-center">
@@ -251,13 +305,7 @@ const ReportScreen = () => {
                                     Session Review
                                 </h1>
                                 <p className="text-gray-500 dark:text-gray-400 mt-1">
-                                    Completed on {new Date(sessionData.completed_at).toLocaleDateString(undefined, { 
-                                        month: 'short', 
-                                        day: 'numeric', 
-                                        year: 'numeric',
-                                        hour: '2-digit',
-                                        minute: '2-digit'
-                                    })} • {sessionData.duration_seconds ? Math.round(sessionData.duration_seconds / 60) : 0}m Duration
+                                    Completed on {formatDateTime(sessionData.completed_at)} • {sessionData.duration_seconds ? Math.round(sessionData.duration_seconds / 60) : 0}m Duration
                                 </p>
                             </div>
                             <div className="flex gap-3">
@@ -322,6 +370,8 @@ const ReportScreen = () => {
                                     const score = q.score || 0;
                                     const { badge, label } = getStatusBadge(score);
                                     const isExpanded = expandedQuestion === index;
+                                    const questionOffsetSeconds = getQuestionOffset(q);
+                                    const questionOffsetLabel = formatOffset(questionOffsetSeconds);
 
                                     return (
                                         <div
@@ -348,6 +398,24 @@ const ReportScreen = () => {
                                                         <span className="text-xs text-gray-400 dark:text-gray-500">
                                                             • Score: {score}/10
                                                         </span>
+                                                        {hasSessionRecording && Number.isFinite(questionOffsetSeconds) && (
+                                                            <button
+                                                                type="button"
+                                                                onClick={(event) => {
+                                                                    event.stopPropagation();
+                                                                    handleJumpToOffset(questionOffsetSeconds);
+                                                                }}
+                                                                className="text-xs text-primary font-semibold hover:underline"
+                                                                title="Jump to this question in the full recording"
+                                                            >
+                                                                • Jump to {questionOffsetLabel}
+                                                            </button>
+                                                        )}
+                                                        {hasSessionRecording && !Number.isFinite(questionOffsetSeconds) && (
+                                                            <span className="text-xs text-gray-400 dark:text-gray-500">
+                                                                • Time: N/A
+                                                            </span>
+                                                        )}
                                                         {q.topic && (
                                                             <span className="text-xs text-gray-500 dark:text-gray-400">
                                                                 • {q.topic}

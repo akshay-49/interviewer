@@ -28,8 +28,7 @@ from backend.core.config import (
     SESSION_TTL_MINUTES,
     MAX_SESSIONS
 )
-from backend.auth.routes import router as auth_router
-from backend.auth.auth0_utils import get_current_user_from_cookie
+from backend.auth.routes import router as auth_router, _get_dev_user
 from backend.interview.recording_routes import router as recording_router
 from backend.interview.history_routes import router as history_router
 from backend.core.cosmos import init_cosmos_db
@@ -148,11 +147,14 @@ def create_session(persona: str) -> str:
 # --------------------------------------------------
 
 class StartInterviewRequest(BaseModel):
-    role: str
-    experience: str
+    role: Optional[str] = None
+    experience: Optional[str] = None
     role_description: Optional[str] = None
     persona: Optional[str] = DEFAULT_PERSONA  # 'strict' or 'coach'
     recording_mode: Optional[str] = 'audio'  # 'audio' or 'video'
+    invite_code: Optional[str] = None  # For invite-only mode
+    user_id: Optional[str] = None  # User ID from invite acceptance
+    email: Optional[str] = None  # User email from invite acceptance
 
 
 class AnswerRequest(BaseModel):
@@ -160,6 +162,8 @@ class AnswerRequest(BaseModel):
     answer: str
     skip: Optional[bool] = False
     recording_blob_url: Optional[str] = None  # URL to recording in blob storage
+    question_started_at: Optional[str] = None  # ISO timestamp when question audio started
+    question_start_offset_seconds: Optional[float] = None  # Offset in seconds from session start
 
 
 class EndSessionRequest(BaseModel):
@@ -220,7 +224,92 @@ def health():
 
 @app.post("/interview/start")
 def start_interview(req: StartInterviewRequest):
-    logger.info(f"Starting interview: role={req.role}, experience={req.experience}, persona={req.persona}")
+    # Get role and experience - prefer from request, fallback to invite lookup
+    role = req.role
+    experience = req.experience
+    recording_mode = req.recording_mode or 'audio'
+    
+    # Validate that we have role and experience
+    if not role or not role.strip():
+        raise HTTPException(status_code=400, detail="Role is required")
+    if not experience or not experience.strip():
+        raise HTTPException(status_code=400, detail="Experience is required")
+
+    if not req.user_id or not req.email:
+        raise HTTPException(
+            status_code=400,
+            detail="user_id and email are required to start an interview"
+        )
+    
+    logger.info(f"Starting interview: role={role}, experience={experience}, persona={req.persona}")
+
+    # Best-effort: ensure candidate user exists in Cosmos for admin visibility
+    try:
+        from backend.core.cosmos import users_container, serialize_for_cosmos, client
+        from azure.cosmos.partition_key import PartitionKey
+
+        invite = None
+        if req.invite_code:
+            try:
+                db = client.get_database_client("interviewer")
+                invites_container = db.get_container_client("invites")
+            except Exception:
+                invites_container = db.create_container(
+                    id="invites",
+                    partition_key=PartitionKey(path="/invite_code")
+                )
+
+            invite_query = "SELECT * FROM invites WHERE invites.invite_code = @code"
+            invite_items = list(invites_container.query_items(
+                query=invite_query,
+                parameters=[{"name": "@code", "value": req.invite_code}],
+                max_item_count=1,
+                enable_cross_partition_query=True
+            ))
+            invite = invite_items[0] if invite_items else None
+
+        candidate_email = (req.email or (invite.get("candidate_email") if invite else "") or "").lower()
+        candidate_name = (invite.get("candidate_name") if invite else None) or (candidate_email.split("@")[0] if candidate_email else None)
+
+        if candidate_email:
+            user_query = "SELECT * FROM users WHERE users.user_email = @email"
+            user_items = list(users_container.query_items(
+                query=user_query,
+                parameters=[{"name": "@email", "value": candidate_email}],
+                max_item_count=1,
+                enable_cross_partition_query=True
+            ))
+
+            now_iso = datetime.utcnow().isoformat()
+            user_id = req.user_id or (user_items[0].get("user_id") if user_items else str(uuid4()))
+
+            user_doc = {
+                "id": user_id,
+                "user_id": user_id,
+                "user_name": candidate_name or candidate_email,
+                "user_email": candidate_email,
+                "job_title": (invite.get("role") if invite else None) or role,
+                "experience_level": (invite.get("seniority_level") if invite else None) or experience,
+                "job_description": invite.get("job_description") if invite else None,
+                "invite_code": req.invite_code,
+                "invite_status": "accepted" if req.invite_code else None,
+                "auth_provider": "invite",
+                "is_admin": candidate_email.endswith("@accellor.com"),
+                "is_active": True,
+                "access_enabled": True,
+                "invited_by_admin": True,
+                "updated_at": now_iso
+            }
+
+            if user_items:
+                existing_user = user_items[0]
+                user_doc["created_at"] = existing_user.get("created_at") or now_iso
+            else:
+                user_doc["created_at"] = now_iso
+
+            users_container.upsert_item(serialize_for_cosmos(user_doc))
+    except Exception as e:
+        logger.warning(f"Could not ensure candidate user exists: {e}")
     
     # Validate persona
     persona = (req.persona or DEFAULT_PERSONA).lower()
@@ -238,42 +327,62 @@ def start_interview(req: StartInterviewRequest):
 
     # Store lightweight session context for hinting
     SESSION_CONTEXT[session_id] = {
-        "role": req.role,
-        "experience": req.experience,
+        "role": role,
+        "experience": experience,
         "persona": persona,
     }
     
     # Create Cosmos DB session for tracking and history
     try:
-        # Get user info from context if available (can be enhanced with auth later)
-        user_id = getattr(req, 'user_id', 'anonymous')
-        user_email = getattr(req, 'user_email', 'anonymous@example.com')
+        user_id = req.user_id
+        user_email = req.email
+        user_name = None
         
+        logger.info(f"Creating Cosmos session: session_id={session_id[:8]}..., initial user_id={user_id}, email={user_email}")
+
+        # If we have an email, prefer mapping to existing user_id
+        if user_email and user_email != 'anonymous@example.com':
+            try:
+                from backend.core.cosmos import users_container
+                user_query = "SELECT * FROM users WHERE users.user_email = @email"
+                user_items = list(users_container.query_items(
+                    query=user_query,
+                    parameters=[{"name": "@email", "value": user_email.lower()}],
+                    max_item_count=1,
+                    enable_cross_partition_query=True
+                ))
+                if user_items:
+                    existing_user = user_items[0]
+                    user_id = existing_user.get("user_id") or user_id
+                    user_name = existing_user.get("user_name") or user_name
+            except Exception as e:
+                logger.warning(f"Could not map session to existing user: {e}")
+        
+        logger.info(f"Final values before SessionManager.create_session: user_id={user_id}, email={user_email}, name={user_name}")
+
         SessionManager.create_session(
             user_id=user_id,
             user_email=user_email,
-            user_name=getattr(req, 'user_name', None),
-            job_title=getattr(req, 'job_title', None),
-            company_name=getattr(req, 'company_name', None),
+            user_name=user_name,
+            job_title=role,
+            company_name=None,
             total_questions=0,  # Will be updated as questions are asked
-            recording_mode=req.recording_mode  # Store recording mode
+            recording_mode=recording_mode,  # Store recording mode
+            session_id=session_id
         )
     except Exception as e:
         logger.warning(f"Could not create Cosmos DB session: {e}")
 
-    # Validate inputs
-    if not req.role or not req.role.strip():
-        raise HTTPException(status_code=400, detail="Role is required")
-    if not req.experience or not req.experience.strip():
-        raise HTTPException(status_code=400, detail="Experience is required")
-
     state: InterviewState = {
-        "role": req.role,
-        "experience": req.experience,
+        "user_id": user_id,
+        "session_id": session_id,
+        "role": role,
+        "experience": experience,
         "role_description": req.role_description or None,
         "persona": persona,
 
         "current_question": None,
+        "current_question_id": None,
         "last_answer_text": None,
 
         "evaluation": None,
@@ -287,6 +396,7 @@ def start_interview(req: StartInterviewRequest):
         "question_count": 0,
         "end_interview": False,
         "asked_questions": [],
+        "question_ids_asked": [],
 
         "summary": None,
         "spoken_transition": None,
@@ -384,7 +494,9 @@ def answer_interview(req: AnswerRequest):
                 user_answer=req.answer,
                 evaluation_score=evaluation_score,
                 evaluation_feedback=evaluation_feedback,
-                recording_blob_url=req.recording_blob_url
+                recording_blob_url=req.recording_blob_url,
+                question_started_at=req.question_started_at,
+                question_start_offset_seconds=req.question_start_offset_seconds
             )
         except Exception as e:
             logger.warning(f"Could not store answer to Cosmos DB: {e}")
@@ -472,7 +584,9 @@ def answer_interview(req: AnswerRequest):
                 user_answer=req.answer,
                 evaluation_score=evaluation_score,
                 evaluation_feedback=evaluation_feedback,
-                recording_blob_url=req.recording_blob_url
+                recording_blob_url=req.recording_blob_url,
+                question_started_at=req.question_started_at,
+                question_start_offset_seconds=req.question_start_offset_seconds
             )
         except Exception as e:
             logger.warning(f"Could not store answer to Cosmos DB: {e}")
@@ -1116,8 +1230,10 @@ def send_invite(req: dict):
                 f"Hi {candidate_name},\n\n"
                 f"You've been invited to an interview.\n"
                 f"Role: {role or 'Interview'}\n"
-                f"Level: {seniority_level}\n\n"
+                f"Level: {seniority_level}\n"
+                f"Invite Code: {invite_code}\n\n"
                 f"Invite link:\n{invite_link}\n\n"
+                f"Or enter this code on our platform:\n{invite_code}\n\n"
                 "If you did not expect this invite, you can ignore this email."
             )
             html_body = f"""
@@ -1135,20 +1251,7 @@ def send_invite(req: dict):
                     <table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" width=\"100%\" style=\"max-width:620px;background:#ffffff;border:1px solid #e7f1f3;border-radius:16px;overflow:hidden;\">
                         <tr>
                             <td style=\"padding:24px 28px;border-bottom:1px solid #e7f1f3;\">
-                                <img src=\"https://cdn.prod.website-files.com/67ee21872d9955a8ce7e7cbd/67ee21872d9955a8ce7e7e92_img_accellorLogoOriginal.svg\" alt=\"Accellor\" style=\"height:32px;display:block;\" />
-                            </td>
-                        </tr>
-                        <tr>
-                            <td style=\"padding:28px;\">
-                                <p style=\"margin:0 0 12px;font-size:16px;\">Hi {candidate_name},</p>
-                                <h1 style=\"margin:0 0 8px;font-size:22px;line-height:1.3;\">You are invited to an interview</h1>
-                                <p style=\"margin:0 0 18px;color:#4c8e9a;font-size:14px;\">We have set up your interview details below.</p>
-
-                                <table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" width=\"100%\" style=\"background:#f8fbfc;border:1px solid #e7f1f3;border-radius:12px;margin:0 0 20px;\">
-                                    <tr>
-                                        <td style=\"padding:14px 16px;font-size:14px;\">
-                                            <strong style=\"color:#0d191b;\">Role:</strong> {role or 'Interview'}<br />
-                                            <strong style=\"color:#0d191b;\">Level:</strong> {seniority_level}
+                                <img src=\"data:image/svg+xml;base64,PHN2ZyBmaWxsPSJub25lIiBoZWlnaHQ9IjU3IiB2aWV3Qm94PSIwIDAgMjAwIDU3IiB3aWR0aD0iMjAwIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIj48bGluZWFyR3JhZGllbnQgaWQ9ImEiIGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIiB4MT0iMTQiIHgyPSIxOSIgeTE9IjE3IiB5Mj0iMTMuNSI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjNTM2NDdjIi8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjMzEzYjQ5Ii8+PC9saW5lYXJHcmFkaWVudD48bGluZWFyR3JhZGllbnQgaWQ9ImIiIGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIiB4MT0iNS4wMDkxNCIgeDI9IjQ4LjIwODEiIHkxPSIzNy43NzM3IiB5Mj0iMzcuNzczNyI+PHN0b3Agb2Zmc2V0PSIuNDUiIHN0b3AtY29sb3I9IiMwOGFkYzIiLz48c3RvcCBvZmZzZXQ9Ii43IiBzdG9wLWNvbG9yPSIjNTM2NDdjIi8+PC9saW5lYXJHcmFkaWVudD48Y2xpcFBhdGggaWQ9ImMiPjxwYXRoIGQ9Im0wIDExaDQ4LjIyNzd2MzQuNjczaC00OC4yMjc3eiIvPjwvY2xpcFBhdGg+PGNsaXBQYXRoIGlkPSJkIj48cGF0aCBkPSJtNTYuMzAzNiAxN2gxNDMuNDgxdjI5LjA3MzVoLTE0My40ODF6Ii8+PC9jbGlwUGF0aD48ZyBjbGlwLXBhdGg9InVybCgjYykiPjxwYXRoIGQ9Im05LjcyNjU4IDEyLjU0MzUtOS4yMzA2ODEgMTguNDM4NmMtLjk1NzY0NiAxLjkxNTYtLjQ4MjM4MDIgNC4yNTc0IDEuMDMwNTcxIDUuNzczMmw0LjI3NTk3IDQuMzUwMyAxMi4zODAwNi0yNS4xNDk1cy00LjM1MzItNC4yNTgyLTguNDU1NTctMy40MTIzeiIgZmlsbD0iIzUzNjQ3YyIvPjxwYXRoIGQ9Im05LjcyNjU4IDEyLjU0MzUtOS4yMzA2ODEgMTguNDM4NmMtLjk1NzY0NiAxLjkxNTYtLjQ4MjM4MDIgNC4yNTc0IDEuMDMwNTcxIDUuNzczMmw0LjI3NTk3IDQuMzUwMyAxMi4zODAwNi0yNS4xNDk1cy00LjM1MzItNC4yNTgyLTguNDU1NTctMy40MTIzeiIgZmlsbD0idXJsKCNhKSIgZmlsbC1vcGFjaXR5PSIuNiIvPjxwYXRoIGQ9Im00OC4wMjc4IDM5LjgwMDdjLS4wNDUyLS4wOTY4IDMuOTU2MS0xMi44NzEtMjMuNDQxLTkuMjgzIDAgMC0xMS4wMTAxIDEuNTkzMy0xOS41Nzc2NiA5Ljc4MDNsMy44MTgxMyAzLjg4NWMxLjYzNjczIDEuNjU4MSA0LjIwNDQzIDEuOTYwMSA2LjE4MDYzLjcyNjQgNy42NzU0LTQuNzkyNSAyNS4yNTM4LTE2LjM1NSAzMy4wMTk1LTUuMTA4N3oiIGZpbGw9InVybCgjYikiLz48cGF0aCBkPSJtMzIuMjU4MyAzNi4xMTQ0Yy0zLjI5NDEtOS4xMTQ0LTYuNDY1Mi0yMC4yMjMtMTguNTgwNS0yNC44NTIyLTIuMzgwNi40Mzk3LTMuOTQ0NDYgMS4yNzc4LTMuOTUwODcgMS4yODEgMTEuNjY0NjcgNC40NTY3IDE0LjcxNzU3IDE1LjE1MTkgMTcuODg4OTcgMjMuOTI2NS4wMDExLjAwMjkuMDAyMS4wMDU3LjAwMzIuMDA4OS4wMzgxLjEwNTMuMDc3Mi4yMDkyLjExNy4zMTI0LjAwNzIuMDE4NS4wMTM5LjAzNjYuMDIxLjA1NTEuMDM4OC4xLjA3ODcuMTk4OS4xMTg5LjI5Ny4wMDg4LjAyMTcuMDE3Ny4wNDMxLjAyNjYuMDY0OC4wNDAuMDk3NS4wODE5LjE5MzkuMTIzOC4yODkyLjAwODIuMDE4NS4wMTY0LjAzNjYuMDI0Ni4wNTUxLjA0MzQuMDk3OS4wODc1LjE5NTMuMTMyNy4yOTE0LjAwMzIuMDA3MS4wMDY3LjAxMzkuMDA5OS4wMjEuMDQ0MS4wOTM5LjA4OTMuMTg2Ny4xMzQ5LjI3ODUuMDA4NS4wMTcxLjAxNy4wMzQ1LjAyNTYuMDUyLjA0NTUuMDkwNy4wOTE0LjE4MDMuMTM4My4yNjk2LjAxMDcuMDIwMy4wMjE0LjA0MDYuMDMyMS4wNjA4LjA0NjYuMDg4My4wOTQyLjE3NTQuMTQyMy4yNjE5LjAwOTkuMDE3Ny4wMTk5LjAzNTUuMDI5OC4wNTMuMDQ5OC4wODg5LjEwMDQuMTc3MS4xNTE5LjI2NDMuMDA0Ny4wMDc4LjAwOTMuMDE1My4wMTM5LjAyMzEuMDQ5NS4wODMyLjA5OTYuMTY1OC4xNTAxLjI0NzYuMDEuMDE2LjAyLjAzMjQuMDI5OS4wNDg0LjA1MTIuMDgxOC4xMDI4LjE2MjUuMTU1MS4yNDI2LjAxMjUuMDE5Mi4wMjQ5LjAzODQuMDM3Ny4wNTczLjA1MjMuMDc4OS4xMDUuMTU3Ni4xNTguMjM0Ny4wMTE3LjAxNzEuMDIzNS4wMzM4LjAzNTIuMDUwOS4wNTU1LjA3OTcuMTExMy4xNTkuMTY3OS4yMzY5LjAwNi4wMDg2LjAxMjQuMDE2OC4wMTg1LjAyNDkuMDUzNy4wNzM3LjEwNzguMTQ2Mi4xNjI2LjIxODUuMDExNC4wMTQ5LjAyMjQuMDI5NS4wMzM0LjA0NDQuMDU2Mi4wNzMzLjExMjguMTQ1NS4xNzAxLjIxNy4wMTQyLjAxNzguMDI4MS4wMzUzLjA0MjMuMDUzLjA1NjkuMDcwNS4xMTQyLjE0MDIuMTcxOC4yMDkyLjAxMzUuMDE2LjAyNy4wMzIuMDQwNi4wNDc3LjA1OTcuMDcwOC4xMjAyLjE0MDkuMTgxLjIwOTkuMDA3OS4wMDg1LjAxNTcuMDE3LjAyMzIuMDI1OS4wNTcyLjA2NDguMTE1Mi4xMjg1LjE3MzYuMTkxOC4wMTIuMDEzMS4wMjQ1LjAyNjcuMDM2Ni4wMzk4LjA2MDUuMDY1MS4xMjE3LjEyOTIuMTgyOC4xOTI4LjAxNTMuMDE2LjAzMS4wMzIuMDQ2My4wNDc3LjA2MDguMDYyMy4xMjI0LjEyMzguMTgzOS4xODQ2LjAxNDkuMDE0Ni4wMjk5LjAyOTIuMDQ0OC4wNDM4LjA2MzcuMDYyMi4xMjc3LjEyMzguMTkyNS4xODQzLjAwOTIuMDA4NS4wMTg1LjAxNy4wMjc3LjAyNTYuMDYwNS4wNTY1LjEyMTMuMTEyLjE4MjkuMTY2OC4wMTMxLjAxMTcuMDI1OS4wMjM1LjAzOTEuMDM1Mi4wNjQ0LjA1NzMuMTI4OC4xMTM1LjE5MzkuMTY5LjAxNjcuMDE0Mi4wMzM0LjAyODUuMDQ5OC4wNDI3LjA2NDQuMDU0NC4xMjg4LjEwODEuMTkzOS4xNjExLjAxNi4wMTMyLjAzMjMuMDI2LjA0ODMuMDM5Mi4wNjY5LjA1NC4xMzQyLjEwNzQuMjAxNy4xNTk3LjAxMDcuMDA4Mi4wMjE0LjAxNi4wMzE3LjAyNDIuMDYzMy4wNDg3LjEyNjcuMDk2Ny4xOTA3LjE0NDEuMDEzNS4wMDk5LjAyNy4wMjAyLjA0MDIuMDI5OC4wNjc2LjA0OTUuMTM1Mi4wOTgyLjIwMzEuMTQ2My4wMTc0LjAxMjQuMDM0OS4wMjQ1LjA1MjcuMDM2OS4wNjcyLjA0Ny4xMzQ0LjA5MzIuMjAyLjEzODguMDE3MS4wMTEuMDM0Mi4wMjI4LjA1MTYuMDM0MS4wNjk3LjA0NjMuMTM5NS4wOTE4LjIwOTUuMTM2Ni4wMTE0LjAwNzUuMDIzMi4wMTQ2LjAzNDkuMDIxNy4wNjU0LjA0MTcuMTMxMy4wODIyLjE5NzQuMTIyNC4wMTM1LjAwODIuMDI3MS4wMTY3LjA0MDkuMDI0OS4wNzAxLjA0MjMuMTQwNi4wODM2LjIxMS4xMjQ1LjAxNzguMDEwMy4wMzU2LjAyMDcuMDUzNy4wMzEuMDY5Ny4wMzk4LjEzOTUuMDc4Ni4yMDkyLjExNy4wMTc0LjAwOTYuMDM1Mi4wMTkyLjA1MjYuMDI4NS4wNzE5LjAzODcuMTQzNy4wNzcyLjIxNTYuMTE0Mi4wMTIxLjAwNjQuMDI0Ni4wMTI0LjAzNjYuMDE4NS4wNjc2LjAzNDguMTM1Ni4wNjg2LjIwMzUuMTAyMS4wMTMyLjAwNjQuMDI2NC4wMTMxLjAzOTkuMDE5NS4wNzIyLjAzNTIuMTQ0OC4wNjk0LjIxNzcuMTAzMi4wMTc4LjAwODIuMDM1Ni4wMTY3LjA1MzcuMDI0OS4wNzE1LjAzMjcuMTQzLjA2NDcuMjE0NS4wOTYuMDE3OC4wMDc5LjAzNTYuMDE1My4wNTM0LjAyMzIuMDczMy4wMzE2LjE0NjUuMDYyNi4yMjAyLjA5MjguMDEyNC4wMDUuMDI0OS4wMS4wMzcuMDE0OS4wNjk3LjAyODEuMTM5NS4wNTU5LjIwOTIuMDgyOS4wMTI0LjAwNDcuMDI0OS4wMDk2LjAzNy4wMTQ2LjA3NC4wMjg1LjE0ODMuMDU1NS4yMjI3LjA4MjYuMDE3NC4wMDY0LjAzNDguMDEyOC4wNTIzLjAxODguMDcyOS4wMjYuMTQ1OC4wNTEyLjIxODguMDc1OC4wMTc0LjAwNTcuMDM0OC4wMTE3LjA1MjMuMDE3NC4wNzQ3LjAyNDYuMTQ5LjA0ODcuMjIzNy4wNzE5LjAxMjEuMDAzOS4wMjQ2LjAwNzQuMDM2Ny4wMTEuMDcxNS4wMjIuMTQzLjA0MzQuMjE0NS4wNjQuMDExLjAwMzIuMDIyLjAwNjQuMDMzLjAwOTYuMDc1NS4wMjE3LjE1MDkuMDQyLjIyNjMuMDYyMy4wMTY3LjAwNDMuMDMzMS4wMDg5LjA0OTguMDEzMS4wNzM2LjAxOTMuMTQ3Ni4wMzc4LjIyMTMuMDU1NS4wMTY3LjAwNC4wMzM0LjAwNzkuMDUwMS4wMTIxLjA3NTEuMDE3OC4xNTA1LjAzNTMuMjI1Ni4wNTE2LjAxMTcuMDAyNS4wMjM0LjAwNS4wMzUyLjAwNzUuMDcyOS4wMTU2LjE0NTguMDMwNi4yMTg4LjA0NTIuMDA5Mi4wMDE3LjAxODUuMDAzNS4wMjc3LjAwNTcuMDc2NS4wMTQ5LjE1MjYuMDI4OC4yMjg3LjA0MTkuMDE1My4wMDI5LjAzMDYuMDA1NC4wNDU5LjAwODIuMDc0NC4wMTI4LjE0ODQuMDI0Ni4yMjI3LjAzNTkuMDE1Ny4wMDI1LjAzMTMuMDA0Ny4wNDcuMDA3Mi4wNzU0LjAxMS4xNTA4LjAyMTcuMjI1OS4wMzEzLjAxMDcuMDAxNC4wMjE3LjAwMjUuMDMyNC4wMDM5LjA3MzkuMDA5Mi4xNDgzLjAxODEuMjIxOS4wMjYuMDA3NS4wMDA3LjAxNDYuMDAxNy4wMjIxLjAwMjQuMDc2NS4wMDgyLjE1MjYuMDE1LjIyODcuMDIxNy4wMTM5LjAwMTEuMDI3OC4wMDI1LjA0MTYuMDAzNi4wNzQuMDA2LjE0OC4wMTE0LjIyMTcuMDE2LjAxNDYuMDAxMS4wMjkxLjAwMTguMDQzNy4wMDI1LjA3NDcuMDA0My4xNDk0LjAwODIuMjIzOC4wMTE0LjAwOTkuMDAwMy4wMTk5LjAwMDcuMDI5OS4wMDEuMDc0Ny4wMDI5LjE0OTQuMDA1LjIyMzQuMDA2NWguMDE0OWMuMDc2MS4wMDEuMTUxNi4wMDE0LjIyNy4wMDE0aC4wMzdjLjA3MjktLjAwMDQuMTQ1OC0uMDAxOC4yMTg0LS4wMDM2LjAxMzItLjAwMDMuMDI2My0uMDAwNy4wMzktLjAwMS4wNzMzLS4wMDIyLjE0NjYtLjAwNS4yMTk1LS4wMDg5LjAwODktLjAwMDQuMDE3OC0uMDAwLjAyNjctLjAwMTUuMDc0Ny0uMDAzOS4xNDg3LS4wMDg1LjIyMjctLjAxMzguMDAyOCAwIC4wMDU3LS4wMDA0LjAwODItLjAwMDguMDc0Ny0uMDA1Ni4xNDg3LS4wMTIuMjIyNy0uMDE5Mi4wMTA2LS4wMDEuMDIxNy0uMDAyMS4wMzIzLS4wMDMyLjA3MTItLjAwNzEuMTQyMy0uMDE0OS4yMTI4LS4wMjM0LjAxMTctLjAwMTUuMDIzNC0uMDAyOS4wMzUyLS4wMDQzLjA3MTEtLjAwODkuMTQyMy0uMDE4Mi4yMTI3LS4wMjg1LjAwNzgtLjAwMS4wMTU3LS4wMDI1LjAyMzUtLjAwMzUuMDczMy0uMDExMS4xNDYyLS4wMjI0LjIxODgtLjAzNDkuMDAwNyAwIC4wMDE3IDAgLjAwMjUtLjAwMDMuMDcyMi0uMDEyNS4xNDQtLjAyNTcuMjE1Mi0uMDM5OS4wMDkyLS4wMDE4LjAxODUtLjAwMzUuMDI4MS0uMDA1My4wNjg2LS4wMTM1LjEzNjYtLjAyODEuMjA0Mi0uMDQzMS4wMTA2LS4wMDI1LjAyMTMtLjAwNDYuMDMyLS4wMDcxLjA2NzktLjAxNTMuMTM1OS0uMDMxMy4yMDMxLS4wNDguMDAyNS0uMDAwNy4wMDU0LS4wMDE0LjAwNzUtLjAwMjEtNC4wMTM0LS44ODAxLTguMTUxLTMuNzg0Ny0xMC4xMzIxLTkuMjY1OXoiIGZpbGw9IiM0ZWM4ZjAiLz48cGF0aCBkPSJtNDguMjAwMyAzNy42ODA4Yy05LjY2NzUgMTAuODQxOC0xMC43MjE2LTYuODU1MS0xOC44ODMzLTE5LjA2NjEtNS4xNDE0LTcuNjkyMS0xMS41Nzg5LTguMTAyMy0xNS42MzkyLTcuMzUyNGwuMDU1NS4wMjEzYzEyLjA2OTggNC42NDIgMTUuMjM2MiAxNS43MzA0IDE4LjUyNTMgMjQuODMwOSAxLjk4MTEgNS40ODEyIDYuMTE4NCA4LjM4NjEgMTAuMTMxOCA5LjI2NjIuNjc1Ni0uMTY5MyAxLjMwNDEtLjQxMDEgMS44NjYyLS43MTg2IDQuNTU3Ny0yLjQ5OTQgMy45NDQxLTYuOTgxMyAzLjk0NDEtNi45ODEzeiIgZmlsbD0iIzA4YWRjMiIvPjwvZz48ZyBjbGlwLXBhdGg9InVybCgjZCkiIGZpbGw9IiMyOTMxM2QiPjxwYXRoIGQ9Im02Ni4zODgyIDI1LjU0MzFjLTMuMTAyNSAwLTUuOTg4My40ODE5LTguNjI2MSAxLjM4NDFsMS4zNjQ3IDMuMTU4NmMxLjkyNDItLjY5MjEgNC4yODE4LTEuMTQyNyA2LjQyMjctMS4xNDI3IDIuNzYxOCAwIDQuMzQ0My43ODI2IDQuMzQ0MyAyLjg4Nzl2LjkwMjNjLTcuMjkxNS41NzAzLTEzLjU5MDIgMS45MjQyLTEzLjU5MDIgNy4xMjg4IDAgNC4yNDA4IDQuMDAyNSA2LjEzNTkgMTAuNDI2MyA2LjEzNTkgMy40NzU1IDAgNi44MjY5LS40ODE5IDkuMTUzMi0xLjM1NHYtMTEuOTQyYzAtNS4xMTQtMy41OTk0LTcuMTU4OS05LjQ5NDktNy4xNTg5em0zLjQ3NTQgMTYuODc2Yy0uNzQ0OS4zMDA3LTEuODMwNC40NTA2LTIuOTE3LjQ1MDYtMi44MjMzIDAtNC41OTIzLS45OTI5LTQuNTkyMy0zLjI0OTEgMC0zLjMzODUgMy4wNDEtNC4wMDA0IDcuNTA5My00LjM5MTd6Ii8+PHBhdGggZD0ibTkxLjExODQgNDIuMTQ3NGMtMy4xOTYyIDAtNC44NDAyLTIuODI3Ni00Ljg0MDItNi41MjcyIDAtMy42OTk3IDEuNjQ1LTYuNDY2OSA0Ljg0MDItNi40NjY5IDEuMjQwOCAwIDIuMzI3NC4yNzA2IDMuMjI3NS44NDE5bDEuMzAzMy0zLjA5ODFjLTEuNjc1Mi0uOTMyNS0zLjU5OTQtMS4zODQyLTUuOTU4MS0xLjM4NDItNi4zNjEyIDAtOS45OTE5IDQuMjQxOS05Ljk5MTkgMTAuMTk3OHMzLjU5OTUgMTAuMjg3MyA5Ljk5MTkgMTAuMjg3M2MyLjM1ODcgMCA0LjMxMzEtLjQyMTUgNi4wMTk2LTEuMzg0MWwtMS4zOTYtMy4zMDk1Yy0uOTAwMi42MDE1LTEuOTU0NC44NDE5LTMuMTk2My44NDE5eiIvPjxwYXRoIGQ9Im0xMDguOTMgNDIuMTQ3NGMtMy4xOTYgMC00Ljg0MS0yLjgyNzYtNC44NDEtNi41MjcyIDAtMy42OTk3IDEuNjQ1LTYuNDY2OSA0Ljg0MS02LjQ2NjkgMS4yNDEgMCAyLjMyNy4yNzA2IDMuMjI3Ljg0MTlsMS4zMDMtMy4wOTgxYy0xLjY3NS0uOTMyNS0zLjYtMS4zODQyLTUuOTU3LTEuMzg0Mi02LjM2MSAwLTkuOTkyMSA0LjI0MTktOS45OTIxIDEwLjE5NzhzMy41OTkxIDEwLjI4NzMgOS45OTIxIDEwLjI4NzNjMi4zNTcgMCA0LjMxMy0uNDIxNSA2LjAxOS0xLjM4NDFsLTEuMzk2LTMuMzA5NWMtLjkuNjAxNS0xLjk1NS44NDE5LTMuMTk2Ljg0MTl6Ii8+PHBhdGggZD0ibTEyNi4xODIgMjUuNDgyN2MtNi43MzMgMC0xMC44NiAzLjcyOTktMTAuODYgMTAuMTA3M3M0LjM3NSAxMC4zNzc4IDExLjY2NyAxMC4zNzc4YzMuMTk2IDAgNi4xNzQtLjQ1MTcgOC41MzMtMS4zODQxbC0xLjMwMy0zLjUxOTdjLTEuNjQ0LjY2MTkgLTQuMDk2IDEuMTQyNy02LjI5OSAxLjE0MjctMy4zMiAwLTUuODM0LTEuNDQzNC02LjIzNy00LjU0MjdsMTQuNjQ1LTEuOTI1M2MwLTYuNDY2OC0zLjM1LTEwLjI1NzEtMTAuMTQ2LTEwLjI1NzF6bS00LjkzNCA5LjQ0NTR2LS40NTE3YzAtMy41OC0xLjc2OS01LjcxNTUgNC42MjQtNS43MTU1IDIuODU0IDAgNC4zMTMgMS43NDQyIDQuMzEzIDUuMDIzNGwtOC45MzcgMS4xNDI3eiIvPjxwYXRoIGQ9Im0xNDYuNTk5IDE3aC02LjMzdjI5LjA3MzVoNi4zM3oiLz48cGF0aCBkPSJtMTU3Ljg2MyAxN2gtNi4zM3YyOS4wNzM1aDYuMzN6Ii8+PHBhdGggZD0ibTEuNTAyIDI1LjU0MzFjLTMuMTAyNSAwLTUuOTg4My40ODE5LTguNjI2MSAxLjM4NDFsMS4zNjQ3IDMuMTU4NmMxLjkyNDItLjY5MjEgNC4yODE4LTEuMTQyNyA2LjQyMjctMS4xNDI3IDIuNzYxOCAwIDQuMzQ0My43ODI2IDQuMzQ0MyAyLjg4Nzl2LjkwMjNjLTcuMjkxNS41NzAzLTEzLjU5MDIgMS45MjQyLTEzLjU5MDIgNy4xMjg4IDAgNC4yNDA4IDQuMDAyNSA2LjEzNTkgMTAuNDI2MyA2LjEzNTkgMy40NzU1IDAgNi44MjY5LS40ODE5IDkuMTUzMi0xLjM1NHYtMTEuOTQyYzAtNS4xMTQtMy41OTk0LTcuMTU4OS05LjQ5NDktNy4xNTg5em0zLjQ3NTQgMTYuODc2Yy0uNzQ0OS4zMDA3LTEuODMwNC40NTA2LTIuOTE3LjQ1MDYtMi44MjMzIDAtNC41OTIzLS45OTI5LTQuNTkyMy0zLjI0OTEgMC0zLjMzODUgMy4wNDEtNC4wMDA0IDcuNTA5My00LjM5MTd6Ii8+PHBhdGggZD0ibTE5Ni44OTkgMjUuNTEyOWMtNC4wMzQgMC03LjEzNy40NTE3LTkuODY3IDEuMzg0MnYxOS4xNDExaDA2LjM2di0xNi43MzU5Yy41OS0uMjQwNCAxLjQ1OC0uMzYxMSAyLjM1OS0uMzYxMS45IDAgMS45ODUuMTQ5OCMyLjg1NC40NTE3bDEuMTc5LTMuNzI5OWMtLjcxMy0uMDkwNS0xLjg2MS0uMTUwOS0yLjg4NS0uMTUwOXoiLz48L2c+PC9zdmc+\" alt=\"Accellor\" style=\"height:32px;display:block;\" /> <span style=\"background:#e7f1f3;padding:2px 6px;border-radius:4px;\">{invite_code}</span>
                                         </td>
                                     </tr>
                                 </table>
@@ -1164,6 +1267,9 @@ def send_invite(req: dict):
 
                                 <p style=\"margin:0 0 6px;color:#4c8e9a;font-size:12px;\">Or copy and paste this link:</p>
                                 <p style=\"margin:0 0 18px;font-size:12px;word-break:break-all;\"><a href=\"{invite_link}\" style=\"color:#0d191b;\">{invite_link}</a></p>
+
+                                <p style=\"margin:0 0 12px;color:#7a8a8c;font-size:12px;\">If you don't have access to the link, you can enter your invite code directly on our platform:</p>
+                                <p style=\"margin:0 0 18px;padding:12px 14px;background:#f0fdff;border-left:4px solid #11b5ae;border-radius:4px;font-family:monospace;font-size:13px;font-weight:600;color:#0d191b;\">{invite_code}</p>
 
                                 <p style=\"margin:0;color:#7a8a8c;font-size:12px;\">If you did not expect this invite, you can ignore this email.</p>
                             </td>
@@ -1289,7 +1395,7 @@ def resend_invite(invite_code: str):
                     <table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" width=\"100%\" style=\"max-width:620px;background:#ffffff;border:1px solid #e7f1f3;border-radius:16px;overflow:hidden;\">
                         <tr>
                             <td style=\"padding:24px 28px;border-bottom:1px solid #e7f1f3;\">
-                                <img src=\"https://cdn.prod.website-files.com/67ee21872d9955a8ce7e7cbd/67ee21872d9955a8ce7e7e92_img_accellorLogoOriginal.svg\" alt=\"Accellor\" style=\"height:32px;display:block;\" />
+                                <img src=\"data:image/svg+xml;base64,PHN2ZyBmaWxsPSJub25lIiBoZWlnaHQ9IjU3IiB2aWV3Qm94PSIwIDAgMjAwIDU3IiB3aWR0aD0iMjAwIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIj48bGluZWFyR3JhZGllbnQgaWQ9ImEiIGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIiB4MT0iMTQiIHgyPSIxOSIgeTE9IjE3IiB5Mj0iMTMuNSI+PHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjNTM2NDdjIi8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjMzEzYjQ5Ii8+PC9saW5lYXJHcmFkaWVudD48bGluZWFyR3JhZGllbnQgaWQ9ImIiIGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIiB4MT0iNS4wMDkxNCIgeDI9IjQ4LjIwODEiIHkxPSIzNy43NzM3IiB5Mj0iMzcuNzczNyI+PHN0b3Agb2Zmc2V0PSIuNDUiIHN0b3AtY29sb3I9IiMwOGFkYzIiLz48c3RvcCBvZmZzZXQ9Ii43IiBzdG9wLWNvbG9yPSIjNTM2NDdjIi8+PC9saW5lYXJHcmFkaWVudD48Y2xpcFBhdGggaWQ9ImMiPjxwYXRoIGQ9Im0wIDExaDQ4LjIyNzd2MzQuNjczaC00OC4yMjc3eiIvPjwvY2xpcFBhdGg+PGNsaXBQYXRoIGlkPSJkIj48cGF0aCBkPSJtNTYuMzAzNiAxN2gxNDMuNDgxdjI5LjA3MzVoLTE0My40ODF6Ii8+PC9jbGlwUGF0aD48ZyBjbGlwLXBhdGg9InVybCgjYykiPjxwYXRoIGQ9Im05LjcyNjU4IDEyLjU0MzUtOS4yMzA2ODEgMTguNDM4NmMtLjk1NzY0NiAxLjkxNTYtLjQ4MjM4MDIgNC4yNTc0IDEuMDMwNTcxIDUuNzczMmw0LjI3NTk3IDQuMzUwMyAxMi4zODAwNi0yNS4xNDk1cy00LjM1MzItNC4yNTgyLTguNDU1NTctMy40MTIzeiIgZmlsbD0iIzUzNjQ3YyIvPjxwYXRoIGQ9Im05LjcyNjU4IDEyLjU0MzUtOS4yMzA2ODEgMTguNDM4NmMtLjk1NzY0NiAxLjkxNTYtLjQ4MjM4MDIgNC4yNTc0IDEuMDMwNTcxIDUuNzczMmw0LjI3NTk3IDQuMzUwMyAxMi4zODAwNi0yNS4xNDk1cy00LjM1MzItNC4yNTgyLTguNDU1NTctMy40MTIzeiIgZmlsbD0idXJsKCNhKSIgZmlsbC1vcGFjaXR5PSIuNiIvPjxwYXRoIGQ9Im00OC4wMjc4IDM5LjgwMDdjLS4wNDUyLS4wOTY4IDMuOTU2MS0xMi44NzEtMjMuNDQxLTkuMjgzIDAgMC0xMS4wMTAxIDEuNTkzMy0xOS41Nzc2NiA5Ljc4MDNsMy44MTgxMyAzLjg4NWMxLjYzNjczIDEuNjU4MSA0LjIwNDQzIDEuOTYwMSA2LjE4MDYzLjcyNjQgNy42NzU0LTQuNzkyNSAyNS4yNTM4LTE2LjM1NSAzMy4wMTk1LTUuMTA4N3oiIGZpbGw9InVybCgjYikiLz48cGF0aCBkPSJtMzIuMjU4MyAzNi4xMTQ0Yy0zLjI5NDEtOS4xMTQ0LTYuNDY1Mi0yMC4yMjMtMTguNTgwNS0yNC44NTIyLTIuMzgwNi40Mzk3LTMuOTQ0NDYgMS4yNzc4LTMuOTUwODcgMS4yODEgMTEuNjY0NjcgNC40NTY3IDE0LjcxNzU3IDE1LjE1MTkgMTcuODg4OTcgMjMuOTI2NS4wMDExLjAwMjkuMDAyMS4wMDU3LjAwMzIuMDA4OS4wMzgxLjEwNTMuMDc3Mi4yMDkyLjExNy4zMTI0LjAwNzIuMDE4NS4wMTM5LjAzNjYuMDIxLjA1NTEuMDM4OC4xLjA3ODcuMTk4OS4xMTg5LjI5Ny4wMDg4LjAyMTcuMDE3Ny4wNDMxLjAyNjYuMDY0OC4wNDAuMDk3NS4wODE5LjE5MzkuMTIzOC4yODkyLjAwODIuMDE4NS4wMTY0LjAzNjYuMDI0Ni4wNTUxLjA0MzQuMDk3OS4wODc1LjE5NTMuMTMyNy4yOTE0LjAwMzIuMDA3MS4wMDY3LjAxMzkuMDA5OS4wMjEuMDQ0MS4wOTM5LjA4OTMuMTg2Ny4xMzQ5LjI3ODUuMDA4NS4wMTcxLjAxNy4wMzQ1LjAyNTYuMDUyLjA0NTUuMDkwNy4wOTE0LjE4MDMuMTM4My4yNjk2LjAxMDcuMDIwMy4wMjE0LjA0MDYuMDMyMS4wNjA4LjA0NjYuMDg4My4wOTQyLjE3NTQuMTQyMy4yNjE5LjAwOTkuMDE3Ny4wMTk5LjAzNTUuMDI5OC4wNTMuMDQ5OC4wODguMTAwNC4xNzcxLjE1MTkuMjY0My4wMDQ3LjAwNzguMDA5My4wMTUzLjAxMzkuMDIzMS4wNDk1LjA4MzIuMDk5Ni4xNjU4LjE1MDEuMjQ3Ni4wMSsuMDE2LjAyLjAzMjQuMDI5OS4wNDg0LjA1MTIuMDgxOC4xMDI4LjE2MjUuMTU1MS4yNDI2LjAxMjUuMDE5Mi4wMjQ5LjAzODQuMDM3Ny4wNTczLjA1MjMuMDc4OS4xMDUuMTU3Ni4xNTguMjM0Ny4wMTE3LjAxNzEuMDIzNS4wMzM4LjAzNTIuMDUwOS4wNTU1LjA3OTcuMTExMy4xNTkuMTY3OS4yMzY5LjAwNi4wMDg2LjAxMjQuMDE2OC4wMTg1LjAyNDkuMDUzNy4wNzM3LjEwNzguMTQ2Mi4xNjI2LjIxODUuMDExNC4wMTQ5LjAyMjQuMDI5NS4wMzM0LjA0NDQuMDU2Mi4wNzMzLjExMjguMTQ1NS4xNzAxLjIxNy4wMTQyLjAxNzguMDI4MS4wMzUzLjA0MjMuMDUzLjA1NjkuMDcwNS4xMTQyLjE0MDIuMTcxOC4yMDkyLjAxMzUuMDE2LjAyNy4wMzIuMDQwNi4wNDc3LjA1OTcuMDcwOC4xMjAyLjE0MDkuMTgxLjIwOTkuMDA3OS4wMDg1LjAxNTcuMDE3LjAyMzIuMDI1OS4wNTcyLjA2NDguMTE1Mi4xMjg1LjE3MzYuMTkxOC4wMTIuMDEzMS4wMjQ1LjAyNjcuMDM2Ni4wMzk4LjA2MDUuMDY1MS4xMjE3LjEyOTIuMTgyOC4xOTI4LjAxNTMuMDE2LjAzMS4wMzIuMDQ2My4wNDc3LjA2MDguMDYyMy4xMjI0LjEyMzguMTgzOS4xODQ2LjAxNDkuMDE0Ni4wMjk5LjAyOTIuMDQ0OC4wNDM4LjA2MzcuMDYyMi4xMjc3LjEyMzguMTkyNS4xODQzLjAwOTIuMDA4NS4wMTg1LjAxNy4wMjc3LjAyNTYuMDYwNS4wNTY1LjEyMTMuMTEyLjE4MjkuMTY2OC4wMTMxLjAxMTcuMDI1OS4wMjM1LjAzOTEuMDM1Mi4wNjQ0LjA1NzMuMTI4OC4xMTM1LjE5MzkuMTY5LjAxNjcuMDE0Mi4wMzM0LjAyODUuMDQ5OC4wNDI3LjA2NDQuMDU0NC4xMjg4LjEwODEuMTkzOS4xNjExLjAxNi4wMTMyLjAzMjMuMDI2LjA0ODMuMDM5Mi4wNjY5LjA1NC4xMzQyLjEwNzQuMjAxNy4xNTk3LjAxMDcuMDA4Mi4wMjE0LjAxNi4wMzE3LjAyNDIuMDYzMy4wNDg3LjEyNjcuMDk2Ny4xOTA3LjE0NDEuMDEzNS4wMDk5LjAyNy4wMjAyLjA0MDIuMDI5OC4wNjc2LjA0OTUuMTM1Mi4wOTgyLjIwMzEuMTQ2My4wMTc0LjAxMjQuMDM0OS4wMjQ1LjA1MjcuMDM2OS4wNjcyLjA0Ny4xMzQ0LjA5MzIuMjAyLjEzODguMDE3MS4wMTEuMDM0Mi4wMjI4LjA1MTYuMDM0MS4wNjk3LjA0NjMuMTM5NS4wOTE4LjIwOTUuMTM2Ni4wMTE0LjAwNzUuMDIzMi4wMTQ2LjAzNDkuMDIxNy4wNjU0LjA0MTcuMTMxMy4wODIyLjE5NzQuMTIyNC4wMTM1LjAwODIuMDI3MS4wMTY3LjA0MDkuMDI0OS4wNzAxLjA0MjMuMTQwNi4wODM2LjIxMS4xMjQ1LjAxNzguMDEwMy4wMzU2LjAyMDcuMDUzNy4wMzEuMDY5Ny4wMzk4LjEzOTUuMDc4Ni4yMDkyLjExNy4wMTc0LjAwOTYuMDM1Mi4wMTkyLjA1MjYuMDI4NS4wNzE5LjAzODcuMTQzNy4wNzcyLjIxNTYuMTExNC4wMTIxLjAwNjQuMDI0Ni4wMTI0LjAzNjYuMDE4NS4wNjc2LjAzNDguMTM1Ni4wNjg2LjIwMzUuMTAyMS4wMTMyLjAwNjQuMDI2NC4wMTMxLjAzOTkuMDE5NS4wNzIyLjAzNTIuMTQ0OC4wNjk0LjIxNzcuMTAzMi4wMTc4LjAwODIuMDM1Ni4wMTY3LjA1MzcuMDI0OS4wNzE1LjAzMjcuMTQzLjA2NDcuMjE0NS4wOTYuMDE3OC4wMDc5LjAzNTYuMDE1My4wNTM0LjAyMzIuMDczMy4wMzE2LjE0NjUuMDYyNi4yMjAyLjA5MjguMDEyNC4wMDUuMDI0OS4wMS4wMzcuMDE0OS4wNjk3LjAyODEuMTM5NS4wNTU5LjIwOTIuMDgyOS4wMTI0LjAwNDcuMDI0OS4wMDk2LjAzNy4wMTQ2LjA3NC4wMjg1LjE0ODMuMDU1NS4yMjI3LjA4MjYuMDE3NC4wMDY0LjAzNDguMDEyOC4wNTIzLjAxOC44MDcyOS4wMjYuMTQ1OC4wNTEyLjIxODguMDc1OC4wMTc0LjAwNTcuMDM0OC4wMTE3LjA1MjMuMDE3NC4wNzQ3LjAyNDYuMTQ5LjA0ODcuMjIzNy4wNzE5LjAxMjEuMDAzOS4wMjQ2LjAwNzQuMDM2Ny4wMTEuMDcxNS4wMjIuMTQzLjA0MzQuMjE0NS4wNjQuMDExLjAwMzIuMDIyLjAwNjQuMDMzLjAwOTYuMDc1NS4wMjE3LjE1MDkuMDQyLjIyNjMuMDYyMy4wMTY3LjAwNDMuMDMzMS4wMDg5LjA0OTguMDEzMS4wNzM2LjAxOTMuMTQ3Ni4wMzc4LjIyMTMuMDU1NS4wMTY3LjAwNC4wMzM0LjAwNzkuMDUwMS4wMTIxLjA3NTEuMDE3OC4xNTA1LjAzNTMuMjI1Ni4wNTE2LjAxMTcuMDAyNS4wMjM0LjAwNS4wMzUyLjAwNzUuMDcyOS4wMTU2LjE0NTguMDMwNi4yMTg4LjA0NTIuMDA5Mi4wMDE3LjAxODUuMDAzNS4wMjc3LjAwNTcuMDc2NS4wMTQ5LjE1MjYuMDI4OC4yMjg3LjA0MTkuMDE1My4wMDI5LjAzMDYuMDA1NC4wNDU5LjAwODIuMDc0NC4wMTI4LjE0ODQuMDI0Ni4yMjI3LjAzNTkuMDE1Ny4wMDI1LjAzMTMuMDA0Ny4wNDcuMDA3Mi4wNzU0LjAxMS4xNTA4LjAyMTcuMjI1OS4wMzEzLjAxMDcuMDAxNC4wMjE3LjAwMjUuMDMyNC4wMDM5LjA3MzkuMDA5Mi4xNDgzLjAxODEuMjIxOS4wMjYuMDA3NS4wMDA3LjAxNDYuMDAxNy4wMjIxLjAwMjQuMDc2NS4wMDgyLjE1MjYuMDE1LjIyODcuMDIxNy4wMTM5LjAwMTEuMDI3OC4wMDI1LjA0MTYuMDAzNi4wNzQuMDA2LjE0OC4wMTE0LjIyMTcuMDE2LjAxNDYuMDAxMS4wMjkxLjAwMTguMDQzNy4wMDI1LjA3NDcuMDA0My4xNDk0LjAwODIuMjIzOC4wMTE0LjAwOTkuMDAwMy4wMTk5LjAwMDcuMDI5OS4wMDEuMDc0Ny4wMDI5LjE0OTQuMDA1LjIyMzQuMDA2NWguMDE0OWMuMDc2MS4wMDEuMTUxNi4wMDE0LjIyNy4wMDE0aC4wMzdjLjA3MjktLjAwMDQuMTQ1OC0uMDAxOC4yMTg0LS4wMDM2LjAxMzItLjAwMDMuMDI2My0uMDAwNy4wMzktLjAwMS4wNzMzLS4wMDIyLjE0NjYtLjAwNS4yMTk1LS4wMDg5LjAwODktLjAwMDQuMDE3OC0uMDAwLjAyNjctLjAwMTUuMDc0Ny0uMDAzOS4xNDg3LS4wMDg1LjIyMjctLjAxMzguMDAyOCAwIC4wMDU3LS4wMDA0LjAwODItLjAwMDguMDc0Ny0uMDA1Ni4xNDg3LS4wMTIuMjIyNy0uMDE5Mi4wMTA2LS4wMDEuMDIxNy0uMDAyMS4wMzIzLS4wMDMyLjA3MTItLjAwNzEuMTQyMy0uMDE0OS4yMTI4LS4wMjM0LjAxMTctLjAwMTUuMDIzNC0uMDAyOS4wMzUyLS4wMDQzLjA3MTEtLjAwODkuMTQyMy0uMDE4Mi4yMTI3LS4wMjg1LjAwNzgtLjAwMS4wMTU3LS4wMDI1LjAyMzUtLjAwMzUuMDczMy0uMDExMS4xNDYyLS4wMjI0LjIxODgtLjAzNDkuMDAwNyAwIC4wMDE3IDAgLjAwMjUtLjAwMDMuMDcyMi0uMDEyNS4xNDQtLjAyNTcuMjE1Mi0uMDM5OS4wMDkyLS4wMDE4LjAxODUtLjAwMzUuMDI4MS0uMDA1My4wNjg2LS4wMTM1LjEzNjYtLjAyODEuMjA0Mi0uMDQzMS4wMTA2LS4wMDI1LjAyMTMtLjAwNDYuMDMyLS4wMDcxLjA2NzktLjAxNTMuMTM1OS0uMDMxMy4yMDMxLS4wNDguMDAyNS0uMDAwNy4wMDU0LS4wMDE0LjAwNzUtLjAwMjEtNC4wMTM0LS44ODAxLTguMTUxLTMuNzg0Ny0xMC4xMzIxLTkuMjY1OXoiIGZpbGw9IiM0ZWM4ZjAiLz48cGF0aCBkPSJtNDguMjAwMyAzNy42ODA4Yy05LjY2NzUgMTAuODQxOC0xMC43MjE2LTYuODU1MS0xOC44ODMzLTE5LjA2NjEtNS4xNDE0LTcuNjkyMS0xMS41Nzg5LTguMTAyMy0xNS42MzkyLTcuMzUyNGwuMDU1NS4wMjEzYzEyLjA2OTggNC42NDIgMTUuMjM2MiAxNS43MzA0IDE4LjUyNTMgMjQuODMwOSAxLjk4MTEgNS40ODEyIDYuMTE4NCA4LjM4NjEgMTAuMTMxOCA5LjI2NjIuNjc1Ni0uMTY5MyAxLjMwNDEtLjQxMDEgMS44NjYyLS43MTg2IDQuNTU3Ny0yLjQ5OTQgMy45NDQxLTYuOTgxMyAzLjk0NDEtNi45ODEzeiIgZmlsbD0iIzA4YWRjMiIvPjwvZz48ZyBjbGlwLXBhdGg9InVybCgjZCkiIGZpbGw9IiMyOTMxM2QiPjxwYXRoIGQ9Im02Ni4zODgyIDI1LjU0MzFjLTMuMTAyNSAwLTUuOTg4My40ODE5LTguNjI2MSAxLjM4NDFsMS4zNjQ3IDMuMTU4NmMxLjkyNDItLjY5MjEgNC4yODE4LTEuMTQyNyA2LjQyMjctMS4xNDI3IDIuNzYxOCAwIDQuMzQ0My43ODI2IDQuMzQ0MyAyLjg4Nzl2LjkwMjNjLTcuMjkxNS41NzAzLTEzLjU5MDIgMS45MjQyLTEzLjU5MDIgNy4xMjg4IDAgNC4yNDA4IDQuMDAyNSA2LjEzNTkgMTAuNDI2MyA2LjEzNTkgMy40NzU1IDAgNi44MjY5LS40ODE5IDkuMTUzMi0xLjM1NHYtMTEuOTQyYzAtNS4xMTQtMy41OTk0LTcuMTU4OS05LjQ5NDktNy4xNTg5em0zLjQ3NTQgMTYuODc2Yy0uNzQ0OS4zMDA3LTEuODMwNC40NTA2LTIuOTE3LjQ1MDYtMi44MjMzIDAtNC41OTIzLS45OTI5LTQuNTkyMy0zLjI0OTEgMC0zLjMzODUgMy4wNDEtNC4wMDA0IDcuNTA5My00LjM5MTd6Ii8+PHBhdGggZD0ibTkxLjExODQgNDIuMTQ3NGMtMy4xOTYyIDAtNC44NDAyLTIuODI3Ni00Ljg0MDItNi41MjcyIDAtMy42OTk3IDEuNjQ1LTYuNDY2OSA0Ljg0MDItNi40NjY5IDEuMjQwOCAwIDIuMzI3NC4yNzA2IDMuMjI3NS44NDE5bDEuMzAzMy0zLjA5ODFjLTEuNjc1Mi0uOTMyNS0zLjU5OTQtLS4xLjM4NDItNS45NTgtMS4zODQyLTYuMzYxMiAwLTkuOTkxOSA0LjI0MTktOS45OTE5IDEwLjE5NzhzMy41OTk1IDEwLjI4NzMgOS45OTE5IDEwLjI4NzNjMi4zNTg3IDAgNC4zMTMxLS40MjE1IDYuMDE5Ni0xLjM4NDFsLTEuMzk2LTMuMzA5NWMtLjkwMDIuNjAxNS0xLjk1NDQuODQxOS0zLjE5NjMuODQxOXoiLz48cGF0aCBkPSJtMTA4LjkzIDQyLjE0NzRjLTMuMTk2IDAtNC44NDEtMi44Mjc2LTQuODQxLTYuNTI3MiAwLTMuNjk5NyAxLjY0NS02LjQ2NjkgNC44NDEtNi40NjY5IDEuMjQxIDAgMi4zMjcuMjcwNiAzLjIyNy44NDE5bDEuMzAzLTMuMDk4MWMtMS42NzUtLjkzMjUtMy42LTEuMzg0Mi01Ljk1Ny0xLjM4NDItNi4zNjEgMC05Ljk5MjEgNC4yNDE5LTkuOTkyMSAxMC4xOTc4czMuNTk5MSAxMC4yODczIDkuOTkyMSAxMC4yODczYzIuMzU3IDAgNC4zMTMtLjQyMTUgNi4wMTktMS4zODQxbC0xLjM5Ni0zLjMwOTVjLS45LjYwMTUtMS45NTUuODQxOS0zLjE5Ni44NDE5eiIvPjxwYXRoIGQ9Im0xMjYuMTgyIDI1LjQ4MjdjLTYuNzMzIDAtMTAuODYgMy43Mjk5LTEwLjg2IDEwLjEwNzNzNC4zNzUgMTAuMzc3OCAxMS42NjcgMTAuMzc3OGMzLjE5NiAwIDYuMTc0LS40NTE3IDguNTMzLTEuMzg0MWwtMS4zMDMtMy41MTk3Yy0xLjY0NC42NjE5LTQuMDk2IDEuMTQyNy02LjI5OSAxLjE0MjctMy4zMiAwLTUuODM0LTEuNDQzNC02LjIzNy00LjU0MjdsMTQuNjQ1LTEuOTI1M2MwLTYuNDY2OC0zLjM1LTEwLjI1NzEtMTAuMTQ2LTEwLjI1NzF6bS00LjkzNCA5LjQ0NTR2LS40NTE3YzAtMy41OC0xLjc2OS01LjcxNTUgNC42MjQtNS43MTU1IDIuODU0IDAgNC4zMTMgMS43NDQyIDQuMzEzIDUuMDIzNGwtOC45MzcgMS4xNDI3eiIvPjxwYXRoIGQ9Im0xNDYuNTk5IDE3aC02LjMzdjI5LjA3MzVoNi4zM3oiLz48cGF0aCBkPSJtMTU3Ljg2MyAxN2gtNi4zM3YyOS4wNzM1aDYuMzN6Ii8+PHBhdGggZD0ibTEuNTAyIDI1LjU0MzFjLTMuMTAyNSAwLTUuOTg4My40ODE5LTguNjI2MSAxLjM4NDFsMS4zNjQ3IDMuMTU4NmMxLjkyNDItLjY5MjEgNC4yODE4LTEuMTQyNyA2LjQyMjctMS4xNDI3IDIuNzYxOCAwIDQuMzQ0My43ODI2IDQuMzQ0MyAyLjg4Nzl2LjkwMjNjLTcuMjkxNS41NzAzLTEzLjU5MDIgMS45MjQyLTEzLjU5MDIgNy4xMjg4IDAgNC4yNDA4IDQuMDAyNSA2LjEzNTkgMTAuNDI2MyA2LjEzNTkgMy40NzU1IDAgNi44MjY5LS40ODE5IDkuMTUzMi0xLjM1NHYtMTEuOTQyYzAtNS4xMTQtMy41OTk0LTcuMTU4OS05LjQ5NDktNy4xNTg5em0zLjQ3NTQgMTYuODc2Yy0uNzQ0OS4zMDA3LTEuODMwNC40NTA2LTIuOTE3LjQ1MDYtMi44MjMzIDAtNC41OTIzLS45OTI5LTQuNTkyMy0zLjI0OTEgMC0zLjMzODUgMy4wNDEtNC4wMDA0IDcuNTA5My00LjM5MTd6Ii8+PHBhdGggZD0ibTE5Ni44OTkgMjUuNTEyOWMtNC4wMzQgMC03LjEzNy40NTE3LTkuODY3IDEuMzg0MnYxOS4xNDExaDA2LjM2di0xNi43MzU5Yy41OS0uMjQwNCAxLjQ1OC0uMzYxMSAyLjM1OS0uMzYxMS45IDAgMS45ODUuMTQ5OCMyLjg1NC40NTE3bDEuMTc5LTMuNzI5OWMtLjcxMy0uMDkwNS0xLjg2MS0uMTUwOS0yLjg4NS0uMTUwOXoiLz48L2c+PC9zdmc+\" alt=\"Accellor\" style=\"height:32px;display:block;\" />
                             </td>
                         </tr>
                         <tr>
@@ -1372,7 +1478,7 @@ def resend_invite(invite_code: str):
 
 
 @app.post("/admin/set-recording-mode")
-def set_recording_mode(req: dict, current_user = Depends(get_current_user_from_cookie)):
+def set_recording_mode(req: dict, current_user = Depends(_get_dev_user)):
     """Set recording mode (audio/video) for an invite"""
     invite_code = req.get("invite_code")
     recording_mode = req.get("recording_mode", "audio")  # 'audio' or 'video'
@@ -1465,17 +1571,16 @@ def validate_invite(req: dict):
             raise HTTPException(status_code=403, detail="This invite link is no longer active. Please contact your admin.")
         
         candidate_email = invite.get("candidate_email")
+        # Determine if user already exists (check Cosmos DB)
         user_exists = False
-
         try:
-            from backend.core.auth0_manager import Auth0Manager
-
+            # Users are auto-created on invite acceptance via Cosmos DB
+            # No Auth0 dependency anymore
             if candidate_email:
-                auth0_manager = Auth0Manager()
-                auth0_user = auth0_manager.get_user_by_email(candidate_email)
-                user_exists = bool(auth0_user)
+                # Could check Cosmos DB here if needed
+                user_exists = False  # New users created on first invite acceptance
         except Exception as e:
-            logger.warning(f"Failed to check existing Auth0 user for invite: {e}")
+            logger.warning(f"Failed to check existing user: {e}")
 
         return {
             "success": True,
@@ -1499,7 +1604,7 @@ def validate_invite(req: dict):
 
 @app.post("/admin/register-invited-user")
 def register_invited_user(req: dict):
-    """Create Auth0 user and persist the invited user in Cosmos DB."""
+    """Create user and persist the invited user in Cosmos DB."""
     invite_code = req.get("invite_code")
     password = req.get("password")
     
@@ -1557,39 +1662,17 @@ def register_invited_user(req: dict):
         candidate_email = invite.get("candidate_email")
         candidate_name = invite.get("candidate_name")
 
-        from backend.core.auth0_manager import Auth0Manager
-        auth0_manager = Auth0Manager()
-        auth0_user = auth0_manager.create_user(
-            candidate_email,
-            password,
-            user_metadata={
-                "name": candidate_name,
-                "role": invite.get("role"),
-                "seniority_level": invite.get("seniority_level"),
-                "job_description": invite.get("job_description")
-            },
-            app_metadata={
-                "invite_code": invite_code
-            }
-        )
+        # Create user in Cosmos DB (no Auth0 anymore)
+        from uuid import uuid4
+        user_id = str(uuid4())
+        
+        candidate_email = invite.get("candidate_email")
+        candidate_name = invite.get("candidate_name")
 
-        auth0_user_id = auth0_user.get("user_id") if auth0_user else None
-        if not auth0_user_id:
-            raise HTTPException(status_code=500, detail="Failed to create Auth0 user")
-
-        # Create or update user record in Cosmos DB
-        user_query = "SELECT * FROM users WHERE users.user_email = @email"
-        user_items = list(users_container.query_items(
-            query=user_query,
-            parameters=[{"name": "@email", "value": candidate_email}],
-            max_item_count=1,
-            enable_cross_partition_query=True
-        ))
-
+        # Create user record in Cosmos DB
         user_doc = {
-            "id": auth0_user_id,
-            "user_id": auth0_user_id,
-            "auth0_sub": auth0_user_id,
+            "id": user_id,
+            "user_id": user_id,
             "user_name": candidate_name,
             "user_email": candidate_email,
             "role": invite.get("role"),
@@ -1597,7 +1680,7 @@ def register_invited_user(req: dict):
             "job_description": invite.get("job_description"),
             "invite_code": invite_code,
             "invite_status": "accepted",
-            "auth_provider": "auth0",
+            "auth_provider": "invite",
             "is_admin": candidate_email.lower().endswith("@accellor.com"),
             "is_active": True,
             "access_enabled": True,
@@ -1605,6 +1688,15 @@ def register_invited_user(req: dict):
             "created_at": datetime.utcnow().isoformat(),
             "registered_at": datetime.utcnow().isoformat()
         }
+
+        # Check if user already exists
+        user_query = "SELECT * FROM users WHERE users.user_email = @email"
+        user_items = list(users_container.query_items(
+            query=user_query,
+            parameters=[{"name": "@email", "value": candidate_email}],
+            max_item_count=1,
+            enable_cross_partition_query=True
+        ))
 
         if user_items:
             existing_user = user_items[0]
@@ -1617,17 +1709,16 @@ def register_invited_user(req: dict):
         invite["status"] = "used"
         invite["access_enabled"] = False
         invite["registered_at"] = datetime.utcnow().isoformat()
-        invite["user_id"] = auth0_user_id
-        invite["auth0_user_id"] = auth0_user_id
+        invite["user_id"] = user_id
         invites_container.replace_item(item=invite["id"], body=invite)
         
-        logger.info(f"✅ Registered invited user: {auth0_user_id}")
+        logger.info(f"✅ Registered invited user: {user_id}")
         
         return {
             "success": True,
             "message": "User registered successfully",
             "user": {
-                "id": auth0_user_id,
+                "id": user_id,
                 "email": candidate_email,
                 "full_name": candidate_name,
                 "is_admin": candidate_email.lower().endswith("@accellor.com"),
@@ -2071,7 +2162,7 @@ async def get_recent_activity(limit: int = 10):
 
         # Get recently completed interviews (last 7 days)
         try:
-            session_query = "SELECT c.user_name, c.overall_score, c.completed_at FROM sessions c WHERE c.completed_at != null ORDER BY c.completed_at DESC"
+            session_query = "SELECT c.session_id, c.user_name, c.job_title, c.overall_score, c.completed_at FROM sessions c WHERE c.completed_at != null ORDER BY c.completed_at DESC"
             recent_sessions = list(sessions_container.query_items(
                 query=session_query,
                 enable_cross_partition_query=True,
@@ -2091,12 +2182,16 @@ async def get_recent_activity(limit: int = 10):
                         time_ago = f"{time_diff.days} days ago"
 
                     score = session.get('overall_score', 0)
+                    user_name = session.get('user_name', 'User')
+                    job_title = session.get('job_title', 'Technical')
+                    
                     activities.append({
                         "type": "interview_completed",
                         "icon": "check_circle",
-                        "title": "Interview completed",
-                        "description": f"{session.get('user_name', 'User')} - Score: {score:.1f}/10",
+                        "title": f"{job_title} interview completed",
+                        "description": f"{user_name} - Score: {score:.1f}/10",
                         "time_ago": time_ago,
+                        "session_id": session.get("session_id"),
                         "timestamp": completed_date
                     })
         except Exception as e:

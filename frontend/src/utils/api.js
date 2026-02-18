@@ -7,8 +7,16 @@ let currentBase64Audio = null;
 
 export const api = {
     // Start a new interview session
-    async startInterview(role, experience, roleDescription, persona = 'strict', recordingMode = 'audio') {
+    async startInterview(
+        role,
+        experience,
+        roleDescription,
+        persona = 'strict',
+        recordingMode = 'audio',
+        options = {}
+    ) {
         try {
+            const { userId, email, inviteCode } = options;
             const response = await fetch(`${API_BASE_URL}/interview/start`, {
                 method: 'POST',
                 headers: {
@@ -19,7 +27,10 @@ export const api = {
                     experience,
                     role_description: roleDescription || '',
                     persona,
-                    recording_mode: recordingMode
+                    recording_mode: recordingMode,
+                    user_id: userId,
+                    email,
+                    invite_code: inviteCode
                 })
             });
             
@@ -35,7 +46,14 @@ export const api = {
     },
 
     // Submit an answer to the current question
-    async submitAnswer(sessionId, answer, skip = false, recordingBlobUrl = null) {
+    async submitAnswer(
+        sessionId,
+        answer,
+        skip = false,
+        recordingBlobUrl = null,
+        questionStartedAt = null,
+        questionStartOffsetSeconds = null
+    ) {
         try {
             const response = await fetch(`${API_BASE_URL}/interview/answer`, {
                 method: 'POST',
@@ -46,7 +64,9 @@ export const api = {
                     session_id: sessionId,
                     answer,
                     skip,
-                    recording_blob_url: recordingBlobUrl
+                    recording_blob_url: recordingBlobUrl,
+                    question_started_at: questionStartedAt,
+                    question_start_offset_seconds: questionStartOffsetSeconds
                 })
             });
             

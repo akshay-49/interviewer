@@ -27,24 +27,6 @@ const CallbackPage = () => {
             return null;
         };
 
-        const syncUser = async () => {
-            try {
-                const response = await fetch(`${apiBaseUrl}/auth/sync-user`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    credentials: 'include'
-                });
-
-                if (!response.ok) {
-                    const errorData = await response.json();
-                    console.warn('User sync failed:', errorData.detail || response.statusText);
-                }
-            } catch (error) {
-                console.warn('User sync error:', error);
-            }
-        };
 
         const fetchInvite = async (code) => {
             const response = await fetch(`${apiBaseUrl}/admin/validate-invite`, {
@@ -131,7 +113,18 @@ const CallbackPage = () => {
                     }
 
                     resetInterview();
-                    const result = await api.startInterview(role, experience, roleDescription, persona, recordingMode);
+                    const result = await api.startInterview(
+                        role,
+                        experience,
+                        roleDescription,
+                        persona,
+                        recordingMode,
+                        {
+                            userId: profile.id,
+                            email: profile.email,
+                            inviteCode: inviteCode || null
+                        }
+                    );
 
                     updateInterview({
                         sessionId: result.session_id,
@@ -165,8 +158,6 @@ const CallbackPage = () => {
                     return;
                 }
             }
-
-            await syncUser();
 
             const isAdmin = profile.email?.endsWith('@accellor.com') || false;
             navigateTo(isAdmin ? 'admin-dashboard' : 'welcome');

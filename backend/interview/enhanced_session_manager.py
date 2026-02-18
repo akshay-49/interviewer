@@ -27,10 +27,11 @@ class SessionManager:
         job_title: Optional[str] = None,
         company_name: Optional[str] = None,
         total_questions: int = 0,
-        recording_mode: str = 'audio'
+        recording_mode: str = 'audio',
+        session_id: Optional[str] = None
     ) -> str:
         """Create a new interview session"""
-        session_id = str(uuid4())
+        session_id = session_id or str(uuid4())
         
         session_data = {
             'session_id': session_id,
@@ -72,7 +73,9 @@ class SessionManager:
         user_answer: str,
         evaluation_score: float,
         evaluation_feedback: str,
-        recording_blob_url: Optional[str] = None
+        recording_blob_url: Optional[str] = None,
+        question_started_at: Optional[str] = None,
+        question_start_offset_seconds: Optional[float] = None
     ) -> bool:
         """Add an answer/evaluation to session"""
         try:
@@ -83,7 +86,9 @@ class SessionManager:
                 user_answer=user_answer,
                 recording_blob_url=recording_blob_url,
                 evaluation_score=evaluation_score,
-                evaluation_feedback=evaluation_feedback
+                evaluation_feedback=evaluation_feedback,
+                question_started_at=question_started_at,
+                question_start_offset_seconds=question_start_offset_seconds
             )
             
             # Update in memory

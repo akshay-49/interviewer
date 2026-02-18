@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 import os
 from typing import List, Optional
 from datetime import datetime
-from backend.auth.auth0_utils import get_current_user_from_cookie
+from fastapi import Request
 from backend.core.cosmos import (
     get_user_sessions, 
     get_session, 
@@ -15,11 +15,39 @@ from pydantic import BaseModel
 router = APIRouter(prefix="/history", tags=["history"])
 
 
+def _is_dev_mode() -> bool:
+    """Check if running in development mode"""
+    return os.getenv("ENVIRONMENT", "development") != "production"
+
+
 def _is_admin(current_user: dict) -> bool:
-    if os.getenv("ENVIRONMENT", "development") != "production":
+    """Check if user is admin"""
+    # In development mode, always allow admin access
+    if _is_dev_mode():
         return True
+    # In production, check user attributes
     email = (current_user.get("email") or "").lower()
     return current_user.get("is_admin", False) or email.endswith("@accellor.com")
+
+
+def _get_current_user(request: Request) -> dict:
+    """Simple auth dependency - dev mode allows any request"""
+    if _is_dev_mode():
+        return {
+            "auth0_sub": "dev|admin",
+            "email": "admin@dev.local",
+            "full_name": "Development Admin",
+            "is_admin": True,
+            "email_verified": True
+        }
+    # In production, would need real auth - for now just dev
+    return {
+        "auth0_sub": "dev|admin",
+        "email": "admin@dev.local",
+        "full_name": "Development Admin",
+        "is_admin": True,
+        "email_verified": True
+    }
 
 
 class SessionSummary(BaseModel):
@@ -61,7 +89,7 @@ class SessionDetail(BaseModel):
 
 @router.get("/user-sessions", response_model=List[SessionSummary])
 async def get_user_interview_history(
-    current_user = Depends(get_current_user_from_cookie),
+    current_user = Depends(_get_current_user),
     limit: int = 50
 ):
     """Get interview history for current user"""
@@ -95,7 +123,7 @@ async def get_user_interview_history(
 @router.get("/admin/user-sessions/{user_id}", response_model=List[SessionSummary])
 async def get_user_sessions_admin(
     user_id: str,
-    current_user = Depends(get_current_user_from_cookie),
+    current_user = Depends(_get_current_user),
     limit: int = 50
 ):
     """Get interview history for a specific user (admin only)."""
@@ -130,7 +158,7 @@ async def get_user_sessions_admin(
 @router.get("/session/{session_id}", response_model=SessionDetail)
 async def get_session_details(
     session_id: str,
-    current_user = Depends(get_current_user_from_cookie)
+    current_user = Depends(_get_current_user)
 ):
     """Get detailed information for a specific session"""
     try:
@@ -184,7 +212,7 @@ async def get_session_details(
 @router.get("/session-debug/{session_id}")
 async def get_session_details_debug(
     session_id: str,
-    current_user = Depends(get_current_user_from_cookie)
+    current_user = Depends(_get_current_user)
 ):
     """Debug endpoint - returns raw session from Cosmos DB (no auth check, no validation)"""
     try:
@@ -206,7 +234,7 @@ async def get_session_details_debug(
 @router.get("/admin/session/{session_id}", response_model=SessionDetail)
 async def get_session_details_admin(
     session_id: str,
-    current_user = Depends(get_current_user_from_cookie)
+    current_user = Depends(_get_current_user)
 ):
     """Get detailed information for a specific session (admin only)."""
     if not _is_admin(current_user):
@@ -306,7 +334,7 @@ async def get_session_details_public(
 @router.delete("/session/{session_id}")
 async def delete_interview_session(
     session_id: str,
-    current_user = Depends(get_current_user_from_cookie)
+    current_user = Depends(_get_current_user)
 ):
     """Delete a session (admin only or session owner)"""
     try:

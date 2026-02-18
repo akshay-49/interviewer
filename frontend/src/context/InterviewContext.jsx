@@ -14,7 +14,7 @@ export const useInterview = () => {
 export const InterviewProvider = ({ children }) => {
     const getInitialRoute = () => {
         if (typeof window === 'undefined') {
-            return { screen: 'login', params: null };
+            return { screen: 'invite-entrance', params: null };
         }
 
         const path = window.location.pathname || '';
@@ -37,7 +37,8 @@ export const InterviewProvider = ({ children }) => {
             return { screen: 'invite-acceptance', params: { invite_code: inviteMatch[1] } };
         }
 
-        return { screen: 'login', params: null };
+        // Default to invite entry screen (replaced login)
+        return { screen: 'invite-entrance', params: null };
     };
 
     const initialRoute = getInitialRoute();

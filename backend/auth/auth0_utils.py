@@ -269,6 +269,45 @@ def get_current_user_from_cookie(request: Request) -> dict:
     # Opaque token: treat as Auth0 access token and use /userinfo
     return verify_auth0_token(token)
 
+def get_current_user_from_cookie_optional(request: Request) -> dict:
+    """
+    Dependency to get current user from httpOnly cookie or Authorization header
+    In development mode, returns a default admin user if no token is found
+    In production mode, requires a valid token
+    
+    Args:
+        request: FastAPI Request object
+        
+    Returns:
+        Decoded token payload or dev admin user
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # In development mode, allow requests without authentication
+    environment = os.getenv("ENVIRONMENT", "development")
+    if environment != "production":
+        # Try to get token but don't require it in dev
+        token = request.cookies.get("access_token")
+        if not token:
+            auth_header = request.headers.get("Authorization", "")
+            if auth_header.startswith("Bearer "):
+                token = auth_header[7:]
+        
+        if not token:
+            # Return a default admin user for dev mode
+            logger.debug("No authentication token found in development mode, using dev admin user")
+            return {
+                "auth0_sub": "dev|admin",
+                "email": "admin@dev.local",
+                "full_name": "Development Admin",
+                "is_admin": True,
+                "email_verified": True
+            }
+    
+    # In production or if token exists, validate the token
+    return get_current_user_from_cookie(request)
+
 def extract_user_info(auth0_payload: dict) -> dict:
     """
     Extract user information from Auth0 or Entra ID token payload

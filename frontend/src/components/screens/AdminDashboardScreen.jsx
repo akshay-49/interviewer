@@ -19,8 +19,6 @@ const AdminDashboardScreen = () => {
     const [searchQuery, setSearchQuery] = useState('');
     const [userFilter, setUserFilter] = useState('all');
     const [selectedUser, setSelectedUser] = useState(null);
-    const [showUserMenu, setShowUserMenu] = useState(null);
-    const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
     const [isProfileOpen, setIsProfileOpen] = useState(false);
     const profileMenuRef = useRef(null);
 
@@ -199,9 +197,22 @@ const AdminDashboardScreen = () => {
     const formatDate = (dateString) => {
         if (!dateString) return 'N/A';
         try {
-            const date = new Date(dateString);
+            let normalized = dateString;
+            if (typeof dateString === 'string') {
+                const hasTimezone = /[zZ]|[+-]\d{2}:\d{2}$/.test(dateString);
+                if (!hasTimezone && dateString.includes('T')) {
+                    normalized = `${dateString}Z`;
+                }
+            }
+            const date = new Date(normalized);
             if (isNaN(date.getTime())) return 'N/A';
-            return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+            return date.toLocaleString(undefined, {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
         } catch {
             return 'N/A';
         }
@@ -460,7 +471,30 @@ const AdminDashboardScreen = () => {
                             ) : recentActivity.length > 0 ? (
                                 <div className="space-y-3">
                                     {recentActivity.map((activity, idx) => (
-                                        <div key={idx} className="flex items-center gap-4 p-3 hover:bg-[#f8fbfc] rounded-lg transition-colors">
+                                        <div
+                                            key={idx}
+                                            className={`flex items-center gap-4 p-3 rounded-lg transition-colors ${
+                                                activity.type === 'interview_completed' && activity.session_id
+                                                    ? 'hover:bg-[#f0fafb] cursor-pointer'
+                                                    : 'hover:bg-[#f8fbfc]'
+                                            }`}
+                                            onClick={() => {
+                                                if (activity.type === 'interview_completed' && activity.session_id) {
+                                                    navigateTo('report', { sessionId: activity.session_id, isAdmin: true });
+                                                }
+                                            }}
+                                            role={activity.type === 'interview_completed' && activity.session_id ? 'button' : undefined}
+                                            tabIndex={activity.type === 'interview_completed' && activity.session_id ? 0 : undefined}
+                                            onKeyDown={(event) => {
+                                                if (
+                                                    event.key === 'Enter'
+                                                    && activity.type === 'interview_completed'
+                                                    && activity.session_id
+                                                ) {
+                                                    navigateTo('report', { sessionId: activity.session_id, isAdmin: true });
+                                                }
+                                            }}
+                                        >
                                             <div className={`size-10 rounded-full flex items-center justify-center ${
                                                 activity.type === 'user_registered' ? 'bg-primary/10' :
                                                 activity.type === 'interview_completed' ? 'bg-green-50' :
@@ -478,7 +512,12 @@ const AdminDashboardScreen = () => {
                                                 <p className="text-sm font-semibold">{activity.title}</p>
                                                 <p className="text-xs text-[#4c8e9a]">{activity.description}</p>
                                             </div>
-                                            <p className="text-xs text-[#4c8e9a] whitespace-nowrap">{activity.time_ago}</p>
+                                            <div className="text-right">
+                                                <p className="text-xs text-[#4c8e9a] whitespace-nowrap">{activity.time_ago}</p>
+                                                {activity.type === 'interview_completed' && activity.session_id && (
+                                                    <p className="text-[10px] text-primary font-semibold">View report</p>
+                                                )}
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
@@ -569,10 +608,7 @@ const AdminDashboardScreen = () => {
                                             <thead>
                                                 <tr className="bg-[#f8fbfc] text-[#4c8e9a] text-xs font-bold uppercase">
                                                     <th className="px-6 py-4">User</th>
-                                                    <th className="px-6 py-4">Auth Provider</th>
                                                     <th className="px-6 py-4">Joined</th>
-                                                    <th className="px-6 py-4">Status</th>
-                                                    <th className="px-6 py-4">Role</th>
                                                     <th className="px-6 py-4 text-right">Actions</th>
                                                 </tr>
                                             </thead>
@@ -591,46 +627,24 @@ const AdminDashboardScreen = () => {
                                                             </div>
                                                         </td>
                                                         <td className="px-6 py-4">
-                                                            <span className="px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 text-xs font-semibold uppercase">
-                                                                {user.auth_provider || 'local'}
-                                                            </span>
-                                                        </td>
-                                                        <td className="px-6 py-4">
                                                             <p className="text-sm">{formatDate(user.created_at)}</p>
                                                         </td>
-                                                        <td className="px-6 py-4">
-                                                            <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase ${user.is_active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
-                                                                {user.is_active ? 'Active' : 'Inactive'}
-                                                            </span>
-                                                        </td>
-                                                        <td className="px-6 py-4">
-                                                            <span className={`px-2.5 py-1 rounded-full text-xs font-semibold ${user.is_admin ? 'bg-primary/10 text-primary' : 'bg-slate-100 text-slate-700'}`}>
-                                                                {user.is_admin ? 'Admin' : 'User'}
-                                                            </span>
-                                                        </td>
-                                                        <td className="px-6 py-4 text-right">
-                                                            <button 
-                                                                onClick={(e) => {
-                                                                    if (showUserMenu === user.id) {
-                                                                        setShowUserMenu(null);
-                                                                    } else {
-                                                                        const rect = e.currentTarget.getBoundingClientRect();
-                                                                        const dropdownHeight = 200; // approximate height of 3 buttons
-                                                                        const bottomSpace = window.innerHeight - rect.bottom;
-                                                                        
-                                                                        // Position above if not enough space below
-                                                                        const top = bottomSpace < dropdownHeight ? rect.top - dropdownHeight - 8 : rect.bottom + 8;
-                                                                        
-                                                                        setMenuPosition({
-                                                                            top: top,
-                                                                            left: rect.left - 200
-                                                                        });
-                                                                        setShowUserMenu(user.id);
-                                                                    }
+                                                        <td className="px-6 py-4 text-right flex items-center justify-end gap-2">
+                                                            <button
+                                                                onClick={() => {
+                                                                    navigateTo('user-sessions', { userId: user.id });
                                                                 }}
-                                                                className="p-2 text-[#4c8e9a] hover:text-primary hover:bg-primary/5 rounded-lg transition-colors"
+                                                                className="px-3 py-1.5 text-xs font-semibold text-primary bg-primary/10 hover:bg-primary/20 rounded-lg transition-colors"
                                                             >
-                                                                <span className="material-symbols-outlined text-[20px]">more_vert</span>
+                                                                View Sessions
+                                                            </button>
+                                                            <button
+                                                                onClick={() => {
+                                                                    deleteUser(user.id, user.email);
+                                                                }}
+                                                                className="px-3 py-1.5 text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors"
+                                                            >
+                                                                Delete
                                                             </button>
                                                         </td>
                                                     </tr>
@@ -643,87 +657,7 @@ const AdminDashboardScreen = () => {
                                     </div>
                                 </>
                             )}
-                            
-                            {/* User Menu Portal */}
-                            {showUserMenu && (
-                                <>
-                                    <div className="fixed inset-0 z-40" onClick={() => setShowUserMenu(null)}></div>
-                                    <div className="fixed bg-white border border-[#e7f1f3] rounded-lg shadow-2xl z-50 w-48" style={{
-                                        top: `${menuPosition.top}px`,
-                                        left: `${menuPosition.left}px`,
-                                        maxHeight: '400px',
-                                        overflowY: 'auto'
-                                    }}>
-                                        {(() => {
-                                            const selectedUserObj = users.find(u => u.id === showUserMenu);
-                                            return selectedUserObj ? (
-                                                <>
-                                                    <button
-                                                        onClick={() => {
-                                                            toggleUserAdmin(selectedUserObj.id, selectedUserObj.is_admin);
-                                                            setShowUserMenu(null);
-                                                        }}
-                                                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-[#f8fbfc] first:rounded-t-lg"
-                                                    >
-                                                        {selectedUserObj.is_admin ? 'Remove Admin' : 'Make Admin'}
-                                                    </button>
-                                                    <button
-                                                        onClick={() => {
-                                                            toggleUserActive(selectedUserObj.id, selectedUserObj.is_active);
-                                                            setShowUserMenu(null);
-                                                        }}
-                                                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-[#f8fbfc] border-t border-[#e7f1f3]"
-                                                    >
-                                                        {selectedUserObj.is_active ? 'Deactivate' : 'Activate'}
-                                                    </button>
-                                                    <button
-                                                        onClick={() => {
-                                                            navigateTo('user-sessions', { userId: selectedUserObj.id });
-                                                            setShowUserMenu(null);
-                                                        }}
-                                                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-[#f8fbfc] border-t border-[#e7f1f3]"
-                                                    >
-                                                        View Sessions
-                                                    </button>
-                                                    <button
-                                                        onClick={() => {
-                                                            setShowUserMenu(null);
-                                                            // Show role/level selector
-                                                            const role = prompt('Enter job role (e.g., Software Engineer, Product Manager):');
-                                                            if (role) {
-                                                                const level = prompt('Enter seniority level (e.g., Junior, Mid, Senior):');
-                                                                if (level) {
-                                                                    // Save user context and start interview
-                                                                    updateUser({
-                                                                        name: selectedUserObj.full_name,
-                                                                        email: selectedUserObj.email,
-                                                                        isLoggedIn: true,
-                                                                        isAdmin: false,
-                                                                    });
-                                                                    // Navigate directly to interview with role and level
-                                                                    navigateTo('interview', { role, level });
-                                                                }
-                                                            }
-                                                        }}
-                                                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-green-50 border-t border-[#e7f1f3] text-green-700 font-semibold"
-                                                    >
-                                                        Start Interview
-                                                    </button>
-                                                    <button
-                                                        onClick={() => {
-                                                            setShowUserMenu(null);
-                                                            deleteUser(selectedUserObj.id, selectedUserObj.email);
-                                                        }}
-                                                        className="w-full text-left px-4 py-2.5 text-sm hover:bg-red-50 border-t border-[#e7f1f3] last:rounded-b-lg text-red-600 font-semibold"
-                                                    >
-                                                        Delete User
-                                                    </button>
-                                                </>
-                                            ) : null;
-                                        })()}
-                                    </div>
-                                </>
-                            )}
+
                         </div>
                     </>
                 )}

@@ -158,9 +158,25 @@ const SetupScreen = () => {
             console.log('Resetting interview state...');
             resetInterview();
             
+            if (!user?.id || !user?.email) {
+                alert('Please sign in with a valid invite link to start an interview.');
+                setIsSubmitting(false);
+                return;
+            }
+
             console.log('Calling backend API to start interview with default mode...');
             // Start with 'audio' mode by default, user will select mode on next screen
-            const result = await api.startInterview(role, experience, formData.jobDescription, formData.persona === 'coach' ? 'coach' : 'strict', 'audio');
+            const result = await api.startInterview(
+                role,
+                experience,
+                formData.jobDescription,
+                formData.persona === 'coach' ? 'coach' : 'strict',
+                'audio',
+                {
+                    userId: user.id,
+                    email: user.email
+                }
+            );
 
             updateInterview({
                 sessionId: result.session_id,

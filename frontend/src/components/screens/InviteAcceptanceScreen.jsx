@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useInterview } from '../../context/InterviewContext';
 
 const InviteAcceptanceScreen = ({ inviteCode }) => {
-    const { navigateTo } = useInterview();
+    const { navigateTo, updateUser, updateInterview } = useInterview();
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [inviteData, setInviteData] = useState(null);
@@ -35,24 +35,76 @@ const InviteAcceptanceScreen = ({ inviteCode }) => {
         }
     }, [inviteCode]);
 
-    const handleSignUp = async () => {
+    const handleStartInterview = async () => {
         setStartingInterview(true);
         setError('');
 
         try {
-            const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-            const returnTo = `${window.location.origin}/callback?invite_code=${encodeURIComponent(inviteCode || '')}`;
-            const loginHint = inviteData?.candidate_email || '';
-            const screenHint = inviteData?.user_exists ? 'login' : 'signup';
-            const params = new URLSearchParams({
-                screen_hint: screenHint,
-                login_hint: loginHint,
-                return_to: returnTo
+            // Accept the invite (auto-registers user if needed)
+            const acceptResponse = await fetch('http://localhost:8000/auth/accept-invite', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ invite_code: inviteCode })
             });
-            window.location.assign(`${apiBaseUrl}/auth/login?${params.toString()}`);
+
+            if (!acceptResponse.ok) {
+                throw new Error('Failed to accept invite. Please try again.');
+            }
+
+            const acceptData = await acceptResponse.json();
+            const userId = acceptData.user_id || acceptData.userId;
+            const userEmail = acceptData.email || inviteData.candidate_email;
+            const fullName = acceptData.user?.full_name || inviteData.candidate_name || 'Candidate';
+            const role = acceptData.role;
+            const experience = acceptData.seniority_level;
+            const recordingMode = acceptData.recording_mode || 'audio';
+
+            // Update user context with candidate name
+            updateUser({
+                name: fullName,
+                email: userEmail,
+                isLoggedIn: true
+            });
+
+            // Persist recording mode for the interview session
+            updateInterview({ recordingMode: recordingMode });
+
+            // Now start the interview directly with the invite code and user ID
+            const sessionResponse = await fetch('http://localhost:8000/interview/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    invite_code: inviteCode,
+                    user_id: userId,
+                    email: userEmail,
+                    role: role,
+                    experience: experience,
+                    recording_mode: recordingMode
+                })
+            });
+
+            if (!sessionResponse.ok) {
+                const errorData = await sessionResponse.json().catch(() => ({}));
+                console.error('Interview start error:', {
+                    status: sessionResponse.status,
+                    statusText: sessionResponse.statusText,
+                    error: errorData
+                });
+                throw new Error(errorData.detail || 'Failed to start interview');
+            }
+
+            const sessionData = await sessionResponse.json();
+            
+            // Navigate to interview with session ID and first question
+            navigateTo('interview', { 
+                sessionId: sessionData.session_id,
+                inviteCode: inviteCode,
+                firstQuestion: sessionData.question,
+                recordingMode: recordingMode
+            });
         } catch (err) {
-            console.error('Error starting sign up:', err);
-            setError(err.message || 'Failed to start sign up');
+            console.error('Error starting interview:', err);
+            setError(err.message || 'Failed to start interview');
             setStartingInterview(false);
         }
     };
@@ -217,12 +269,10 @@ const InviteAcceptanceScreen = ({ inviteCode }) => {
                 <div className="bg-white rounded-xl border border-[#cfe4e7] p-6 md:p-8 flex flex-col gap-6 shadow-sm">
                     <div>
                         <h2 className="text-[#0d191b] text-2xl font-bold leading-tight">
-                            {inviteData.user_exists ? 'Sign In to Continue' : 'Create Your Account'}
+                            Ready to Start Your Interview?
                         </h2>
                         <p className="text-gray-500 mt-1">
-                            {inviteData.user_exists
-                                ? "We found an existing account for this invite. You'll be redirected to sign in."
-                                : "You'll be redirected to Auth0 to complete your sign up."}
+                            Click the button below to begin. You can't pause or leave during the interview.
                         </p>
                     </div>
                     {error && (
@@ -232,34 +282,30 @@ const InviteAcceptanceScreen = ({ inviteCode }) => {
                         </div>
                     )}
                     <p className="text-gray-500 text-sm">
-                        {inviteData.user_exists
-                            ? 'We will prefill your email address and validate your invite after you sign in.'
-                            : 'We will prefill your email address and validate your invite during sign up.'}
+                        The interview typically takes about 20 minutes. Make sure you're in a quiet environment with a stable internet connection.
                     </p>
                 </div>
 
                 {/* CTA Section */}
                 <div className="flex flex-col items-center gap-4 py-6">
                     <button
-                        onClick={handleSignUp}
+                        onClick={handleStartInterview}
                         disabled={startingInterview}
                         className="w-full md:w-auto min-w-[320px] px-10 py-4 bg-primary text-[#0d191b] text-lg font-black rounded-xl shadow-lg hover:shadow-primary/30 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         {startingInterview
-                            ? 'Redirecting...'
-                            : inviteData.user_exists
-                                ? 'Continue to Sign In'
-                                : 'Continue to Sign Up'}
+                            ? 'Starting Interview...'
+                            : 'Start Interview'}
                     </button>
                     <p className="text-gray-400 text-xs">
-                        By clicking "Continue", you agree to our Terms of Service and Privacy Policy.
+                        By clicking "Start Interview", you agree to our Terms of Service and Privacy Policy.
                     </p>
                 </div>
             </main>
 
             {/* Footer */}
             <footer className="max-w-[960px] mx-auto px-4 pb-12 pt-6 border-t border-gray-100 flex justify-between items-center text-sm text-gray-400">
-                <p>© 2024 Accellor. All rights reserved.</p>
+                <p>© 2026 Accellor. All rights reserved.</p>
             </footer>
         </div>
     );

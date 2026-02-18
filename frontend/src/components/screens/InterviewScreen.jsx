@@ -41,6 +41,8 @@ const InterviewScreen = () => {
     const finalTranscriptRef = useRef('');
     const interimTranscriptRef = useRef('');
     const audioPlayedRef = useRef(false);
+    const questionStartAtRef = useRef(null);
+    const questionStartOffsetRef = useRef(null);
     const panelStateRef = useRef(panelState);
     const allowRecordingRef = useRef(false);
     const [isSessionRecording, setIsSessionRecording] = useState(false);
@@ -48,9 +50,47 @@ const InterviewScreen = () => {
     const [previewPosition, setPreviewPosition] = useState({ x: 24, y: 24 });
     const previewDragRef = useRef({ isDragging: false, offsetX: 0, offsetY: 0 });
 
+    // Initialize interview from navigation params
+    useEffect(() => {
+        if (currentParams?.sessionId && currentParams?.firstQuestion) {
+            console.log('Initializing interview with sessionId:', currentParams.sessionId);
+            console.log('First question:', currentParams.firstQuestion);
+            updateInterview({
+                sessionId: currentParams.sessionId,
+                currentQuestion: currentParams.firstQuestion,
+                questionText: currentParams.firstQuestion,
+                questionNumber: 1,
+                startedAt: interview.startedAt || new Date().toISOString()
+            });
+        }
+    }, [currentParams?.sessionId, currentParams?.firstQuestion]);
+
+    useEffect(() => {
+        if (currentParams?.recordingMode) {
+            updateInterview({ recordingMode: currentParams.recordingMode });
+        }
+    }, [currentParams?.recordingMode]);
+
+    useEffect(() => {
+        if (interview.recordingMode !== 'video' || !isSessionRecording) {
+            return;
+        }
+        if (recordingPreviewRef.current && mediaStreamRef.current) {
+            recordingPreviewRef.current.srcObject = mediaStreamRef.current;
+        }
+    }, [interview.recordingMode, isSessionRecording]);
+
     // Speak question text when component mounts or when new question arrives
     useEffect(() => {
         if (interview.questionText && !interview.audioPlaying && !audioPlayedRef.current) {
+            const nowIso = new Date().toISOString();
+            questionStartAtRef.current = nowIso;
+            if (interview.startedAt) {
+                const offsetMs = Date.parse(nowIso) - Date.parse(interview.startedAt);
+                questionStartOffsetRef.current = Number.isFinite(offsetMs) ? Math.max(offsetMs / 1000, 0) : null;
+            } else {
+                questionStartOffsetRef.current = null;
+            }
             audioPlayedRef.current = true;
             updateInterview({ audioPlaying: true });
             setPanelState('speaking');
@@ -451,7 +491,13 @@ const InterviewScreen = () => {
             setIsRecordingLocal(false);
 
             console.log(`[${interview.recordingMode === 'video' ? '📹 VIDEO' : '🎤 AUDIO'}] Submitting answer for Q${interview.questionNumber}`);
-            submitAnswer(transcriptToSend, false, null);
+            submitAnswer(
+                transcriptToSend,
+                false,
+                null,
+                questionStartAtRef.current,
+                questionStartOffsetRef.current
+            );
         }
     };
 
@@ -485,7 +531,13 @@ const InterviewScreen = () => {
         }
     };
 
-    const submitAnswer = async (answerText, isSkip = false, recordingBlobUrl = null) => {
+    const submitAnswer = async (
+        answerText,
+        isSkip = false,
+        recordingBlobUrl = null,
+        questionStartedAt = null,
+        questionStartOffsetSeconds = null
+    ) => {
         if (isSubmitting) {
             console.log('Already submitting, ignoring click');
             return;
@@ -509,8 +561,23 @@ const InterviewScreen = () => {
         setTranscript('');
 
         try {
-            const result = await api.submitAnswer(interview.sessionId, answerText, isSkip, recordingBlobUrl);
+            const result = await api.submitAnswer(
+                interview.sessionId,
+                answerText,
+                isSkip,
+                recordingBlobUrl,
+                questionStartedAt,
+                questionStartOffsetSeconds
+            );
             console.log('Answer submitted, response:', result);
+            console.log('Response structure:', {
+                final: result.final,
+                step: result.step,
+                hasQuestion: !!result.question,
+                hasSummary: !!result.summary,
+                hasEvaluation: !!result.evaluation,
+                allKeys: Object.keys(result)
+            });
 
             // Store the answer
             const updatedAnswers = [...interview.answers, {
@@ -570,11 +637,20 @@ const InterviewScreen = () => {
                         console.warn('Failed to speak feedback', e);
                         updateInterview({ audioPlaying: false });
                     });
-            } else if (!result.final && result.question) {
+            } else if (!result.final && (result.step === 'question' || result.question)) {
                 // Next question
                 console.log('Getting next question...');
                 console.log('Result:', JSON.stringify(result, null, 2));
                 console.log('Result.evaluation:', result.evaluation);
+                
+                if (!result.question) {
+                    console.error('ERROR: Backend returned step=question but no question field!', result);
+                    alert('Error: Backend did not return the next question. Please try submitting again.');
+                    setIsSubmitting(false);
+                    setPanelState('listening');
+                    return;
+                }
+                
                 audioPlayedRef.current = false; // Reset for next question
                 setHint(null); // Clear hint for next question
                 
@@ -601,28 +677,47 @@ const InterviewScreen = () => {
                     audioPlaying: false,
                     answers: updatedAnswers,
                 });
-                // Don't set panelState here - let the effect handle the flow
+                // Reset panelState to allow the effect to trigger and speak the new question
+                setPanelState('loading');
             } else {
-                // Interview complete
-                console.log('Interview complete');
-                console.log('Result:', JSON.stringify(result, null, 2));
-                console.log('Final feedback state at completion:', currentFeedback);
-                console.log('currentFeedback length at completion:', currentFeedback?.length);
-                console.log('hintsUsed:', interview.hintsUsed);
-                console.log('questionsSkipped:', interview.questionsSkipped);
-                updateInterview({ 
-                    summary: result.summary, 
-                    answers: updatedAnswers,
-                    questionWiseFeedback: currentFeedback,
+                // Interview complete or unexpected response
+                console.log('Unknown response state:', {
+                    final: result.final,
+                    step: result.step,
+                    hasSummary: !!result.summary,
+                    hasQuestion: !!result.question,
+                    allKeys: Object.keys(result)
                 });
-                console.log('Updated interview context with questionWiseFeedback, array length:', currentFeedback?.length);
-                setSessionRecordingEnabled(false);
-                await finalizeSessionRecording();
-                stopAllRecording();
-                navigateTo('results');
+                
+                // Default to checking for summary (interview complete)
+                if (result.final || result.summary) {
+                    console.log('Interview complete');
+                    console.log('Result:', JSON.stringify(result, null, 2));
+                    console.log('Final feedback state at completion:', currentFeedback);
+                    console.log('currentFeedback length at completion:', currentFeedback?.length);
+                    console.log('hintsUsed:', interview.hintsUsed);
+                    console.log('questionsSkipped:', interview.questionsSkipped);
+                    updateInterview({ 
+                        summary: result.summary, 
+                        answers: updatedAnswers,
+                        questionWiseFeedback: currentFeedback,
+                    });
+                    console.log('Updated interview context with questionWiseFeedback, array length:', currentFeedback?.length);
+                    setSessionRecordingEnabled(false);
+                    await finalizeSessionRecording();
+                    stopAllRecording();
+                    navigateTo('results');
+                } else {
+                    console.error('ERROR: Unexpected response format from server:', result);
+                    alert('Unexpected server response. Please refresh and try again.');
+                    setIsSubmitting(false);
+                    setPanelState('listening');
+                }
             }
         } catch (error) {
             console.error('Error submitting answer:', error);
+            setIsSubmitting(false);
+            setPanelState('listening'); // Reset panel state on error
             alert('Failed to submit answer. Please try again.');
         } finally {
             setIsSubmitting(false);

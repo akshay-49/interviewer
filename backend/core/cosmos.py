@@ -65,9 +65,9 @@ try:
     except exceptions.CosmosResourceExistsError:
         question_logs_container = db.get_container_client(QUESTION_LOGS_CONTAINER)
     
-    print("✅ Connected to Cosmos DB (SQL API)")
+    print("[OK] Connected to Cosmos DB (SQL API)")
 except Exception as e:
-    print(f"❌ Could not connect to Cosmos DB: {e}")
+    print(f"[ERROR] Could not connect to Cosmos DB: {e}")
     raise
 
 
@@ -116,6 +116,8 @@ class AnswerRecord(BaseModel):
     recording_blob_url: Optional[str] = None  # URL to blob storage recording
     evaluation_score: float
     evaluation_feedback: str
+    question_started_at: Optional[datetime] = None
+    question_start_offset_seconds: Optional[float] = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -175,6 +177,9 @@ def create_session(session_data: Dict[str, Any]) -> str:
         
         # Add required Cosmos DB id field (should match partition key)
         serialized_data['id'] = serialized_data['session_id']
+        
+        print(f"[CREATE_SESSION] Creating session: id={serialized_data.get('session_id')[:8]}..., user_id={serialized_data.get('user_id')}, email={serialized_data.get('user_email')}")
+        
         result = sessions_container.create_item(body=serialized_data)
         return result['session_id']
     except exceptions.CosmosResourceExistsError:
@@ -186,23 +191,23 @@ def create_session(session_data: Dict[str, Any]) -> str:
 
 
 def get_session(session_id: str) -> Optional[Dict]:
-    """Get session by session_id"""
+    """Get session by session_id - returns session with user data if duplicates exist"""
     try:
         query = (
             "SELECT * FROM sessions "
-            "WHERE sessions.session_id = @session_id OR sessions.id = @session_id"
+            "WHERE sessions.session_id = @session_id OR sessions.id = @session_id "
+            "ORDER BY sessions.user_name DESC"  # Prioritize sessions with user data
         )
         items = list(sessions_container.query_items(
             query=query,
             parameters=[{"name": "@session_id", "value": session_id}],
             enable_cross_partition_query=True,
-            max_item_count=1
+            max_item_count=10  # Get all potential duplicates
         ))
         if items:
-            session = items[0]
-            print(f"DEBUG get_session: Fetched session {session_id}")
-            print(f"DEBUG get_session: Keys in session: {list(session.keys())}")
-            print(f"DEBUG get_session: question_wise_feedback in session: {session.get('question_wise_feedback', 'KEY_NOT_FOUND')}")
+            # Prefer session with user data
+            session = next((s for s in items if s.get('user_name') and s.get('job_title')), items[0])
+            print(f"[GET_SESSION] Fetched session {session_id[:8]}..., user_id={session.get('user_id')}, user_name={session.get('user_name')}")
             if 'question_wise_feedback' in session:
                 print(f"DEBUG get_session: question_wise_feedback length: {len(session.get('question_wise_feedback', []))}")
             return session
@@ -241,8 +246,10 @@ def add_answer_to_session(session_id: str, answer_record: AnswerRecord) -> bool:
     try:
         session = get_session(session_id)
         if not session:
-            print(f"Session {session_id} not found")
+            print(f"[ADD_ANSWER] Session {session_id} not found")
             return False
+        
+        print(f"[ADD_ANSWER] Adding answer to session: id={session_id[:8]}..., user_id={session.get('user_id')}, current_answers={len(session.get('answers', []))}")
         
         # Add answer to session
         if 'answers' not in session:
@@ -254,8 +261,14 @@ def add_answer_to_session(session_id: str, answer_record: AnswerRecord) -> bool:
         session['answers'].append(answer_dict)
         session['updated_at'] = datetime.utcnow().isoformat()
         
-        # Update the session
-        sessions_container.upsert_item(session)
+        # Update the session with explicit partition key
+        partition_key = session.get('user_id')
+        if not partition_key:
+            print(f"[ADD_ANSWER] WARNING: No user_id in session, cannot update")
+            return False
+        
+        sessions_container.upsert_item(body=session, partition_key=partition_key)
+        print(f"[ADD_ANSWER] Successfully updated session in partition {partition_key}")
         return True
     except Exception as e:
         print(f"Error adding answer to session: {e}")
@@ -271,6 +284,22 @@ def update_session_summary(session_id: str, summary: Dict, overall_score: float,
             print(f"Session {session_id} not found")
             return False
         
+        # Calculate duration if we have started_at
+        duration_seconds = None
+        if 'started_at' in session:
+            try:
+                started_at_str = session['started_at']
+                # Handle both ISO format strings and datetime objects
+                if isinstance(started_at_str, str):
+                    # Parse ISO format datetime
+                    started_at = datetime.fromisoformat(started_at_str.replace('Z', '+00:00'))
+                else:
+                    started_at = started_at_str
+                
+                duration_seconds = int((datetime.utcnow() - started_at).total_seconds())
+            except Exception as e:
+                print(f"Could not calculate duration: {e}")
+        
         session.update({
             'summary': summary,
             'overall_score': overall_score,
@@ -279,7 +308,16 @@ def update_session_summary(session_id: str, summary: Dict, overall_score: float,
             'completed_at': datetime.utcnow().isoformat()
         })
         
-        sessions_container.upsert_item(session)
+        if duration_seconds is not None:
+            session['duration_seconds'] = duration_seconds
+        
+        # Update with explicit partition key
+        partition_key = session.get('user_id')
+        if not partition_key:
+            print(f"Warning: No user_id in session during summary update")
+            return False
+        
+        sessions_container.upsert_item(body=session, partition_key=partition_key)
         return True
     except Exception as e:
         print(f"Error updating session summary: {e}")
@@ -295,7 +333,11 @@ def update_session_closing_audio(session_id: str, audio_blob_url: str) -> bool:
             return False
         
         session['closing_audio_blob_url'] = audio_blob_url
-        sessions_container.upsert_item(session)
+        partition_key = session.get('user_id')
+        if partition_key:
+            sessions_container.upsert_item(body=session, partition_key=partition_key)
+        else:
+            sessions_container.upsert_item(session)
         return True
     except Exception as e:
         print(f"Error updating session closing audio: {e}")
@@ -311,7 +353,11 @@ def update_session_recording_url(session_id: str, recording_blob_url: str) -> bo
             return False
 
         session['session_recording_blob_url'] = recording_blob_url
-        sessions_container.upsert_item(session)
+        partition_key = session.get('user_id')
+        if partition_key:
+            sessions_container.upsert_item(body=session, partition_key=partition_key)
+        else:
+            sessions_container.upsert_item(session)
         return True
     except Exception as e:
         print(f"Error updating session recording URL: {e}")

@@ -70,7 +70,14 @@ const UserSessionsScreen = () => {
             
             // Transform sessions
             const transformedSessions = (data || []).map((session, index) => {
-                const sessionDate = new Date(session.completed_at || session.started_at);
+                let sessionDateValue = session.completed_at || session.started_at;
+                if (typeof sessionDateValue === 'string') {
+                    const hasTimezone = /[zZ]|[+-]\d{2}:\d{2}$/.test(sessionDateValue);
+                    if (!hasTimezone && sessionDateValue.includes('T')) {
+                        sessionDateValue = `${sessionDateValue}Z`;
+                    }
+                }
+                const sessionDate = new Date(sessionDateValue);
                 return {
                     id: index + 1,
                     session_id: session.session_id,
