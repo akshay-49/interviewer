@@ -2,17 +2,30 @@
 
 An interactive interview platform with real-time speech recognition, AI-powered question generation, and honest feedback evaluation.
 
+**© 2026 Accellor** - All rights reserved
+
 ## Features
 
-- **Voice-Based Recording**: Real-time speech-to-text using Web Speech API
-- **AI Question Generation**: Adaptive questions based on role, experience, and performance
-- **Auto-Stop on Silence**: Automatically stops recording after 5 seconds of silence
-- **Smart Countdown**: 5-second auto-submit countdown with answer, 10-second without
-- **Pause/Resume**: Full control over recording with pause functionality
-- **Honest Feedback**: Evaluates answers across correctness, clarity, and depth
-- **Session Management**: 30-minute session timeout with 5-minute warning
-- **Interview Adaptation**: Difficulty adjusts based on answer quality
-- **Comprehensive Report**: Final verdict with actionable improvement suggestions
+## Key Features
+
+### Admin Dashboard
+- User management (view, delete users)
+- View interview sessions for each user
+- Questions bank management
+- Candidate invite system with email notifications
+- Analytics and activity tracking
+
+### Interview Features
+- Real-time speech recognition with Web Speech API
+- AI-powered adaptive question generation
+- Auto-stop on 5 seconds of silence
+- Smart countdown with 5s (with answer) or 10s (without answer) before auto-submit
+- Pause/resume recording capability
+- Comprehensive evaluation with scoring (0-10 scale) and detailed strengths/weaknesses
+- 60-minute session timeout
+- Adaptive difficulty based on performance
+- Final verdict with actionable feedback
+- Two interview modes: Strict (continuous flow) and Coach (gated progression)
 
 ## Tech Stack
 
@@ -27,7 +40,7 @@ An interactive interview platform with real-time speech recognition, AI-powered 
 ### Frontend
 - **React 19** - UI framework
 - **Vite 5** - Build tool & dev server
-- **Tailwind CSS 3** - Utility-first styling
+- **Tailwind CSS 4** - Utility-first styling
 - **Web Speech API** - Browser speech recognition
 - **Azure Speech Services** - Text-to-speech
 - **JavaScript (ES6+)** - Dynamic interactivity
@@ -37,24 +50,22 @@ An interactive interview platform with real-time speech recognition, AI-powered 
 ```
 interviewer/
 ├── backend/
-│   ├── agents.py          # LLM agents for Q&A, evaluation
-│   ├── config.py          # Configuration settings
-│   ├── graph.py           # LangGraph workflow
-│   ├── llm.py             # LLM configurations
-│   ├── models.py          # Pydantic models
-│   ├── nodes.py           # Graph nodes
+│   ├── api/               # API routes
+│   ├── auth/              # Authentication utilities
+│   ├── core/              # Core utilities (config, database, LLM)
+│   ├── interview/         # Interview workflow & graph logic
 │   ├── main.py            # FastAPI server
 │   └── requirements.txt    # Python dependencies
 ├── frontend/
 │   ├── src/
-│   │   ├── components/    # React components
-│   │   ├── context/       # React context
-│   │   ├── hooks/         # Custom hooks
-│   │   ├── utils/         # Utility functions
+│   │   ├── components/    # React components (screens, UI)
+│   │   ├── context/       # React context (interview state)
+│   │   ├── hooks/         # Custom hooks (auth, API)
+│   │   ├── utils/         # Utility functions (API, auth config)
 │   │   ├── App.jsx        # Main app component
 │   │   └── main.jsx       # Vite entry point
 │   ├── public/            # Static assets
-│   ├── screens/           # Screen templates
+│   ├── screens/           # Screen UI templates
 │   ├── css/               # Tailwind styling
 │   ├── js/                # JavaScript modules
 │   ├── index.html         # HTML entry point
@@ -117,10 +128,13 @@ Frontend runs on `http://localhost:5173` (Vite default)
 
 ### Interview Duration
 - Total questions: 5
-- Session timeout: 30 minutes
-- Session warning: 5 minutes remaining
+- Session timeout: 60 minutes
 
 ## Features in Detail
+
+### Interview Personas
+- **Strict Mode**: Continuous flow - questions follow each other automatically after evaluation
+- **Coach Mode**: Gated progression - waits for user confirmation before proceeding to next question, providing detailed feedback
 
 ### Recording Logic
 - **Normal Recording** (from question audio):
@@ -137,16 +151,16 @@ Frontend runs on `http://localhost:5173` (Vite default)
   - Stops recording → enters review mode → auto-submit countdown
 
 ### Evaluation Criteria
-1. **Correctness**: Technical accuracy (0-10)
-2. **Clarity**: How well explained (0-10)
-3. **Depth**: Level of detail and reasoning (0-10)
+Each answer receives a single holistic score (0-10 scale) based on technical accuracy, clarity, and depth, along with:
+- **Strengths**: What was done well
+- **Weaknesses**: Areas for improvement
 
 ### Final Verdict (5-Level System)
-- **Excellent** (avg 8-10): Strong performance
-- **Good** (avg 6-8): Solid understanding
-- **Satisfactory** (avg 5-6): Acceptable
-- **Needs Improvement** (avg 3-5): Below expectations
-- **Significant Gaps** (avg 0-3): Major deficiencies
+- **Excellent** (8.0-10): Strong performance with comprehensive understanding
+- **Good** (7.0-8.0): Solid understanding with minor gaps
+- **Satisfactory** (6.0-7.0): Acceptable knowledge with some gaps
+- **Needs Improvement** (5.0-6.0): Below expectations with significant gaps
+- **Significant Gaps** (<5.0): Major deficiencies in understanding
 
 ## Keyboard Shortcuts
 
@@ -176,18 +190,17 @@ Frontend runs on `http://localhost:5173` (Vite default)
 - **Network error** recovery
 - **Stale state prevention** using refs in React callbacks
 
-## Browser Compatibility
-
-- Chrome/Edge: Full support
-- Safari: Full support
-- Firefox: Limited support (some Web Speech API features)
-
 ## Development Notes
 
 - Frontend uses refs for callback state management to prevent stale closures
-- Backend uses LangGraph for interview state workflow
+- Backend uses LangGraph for interview state workflow management with two graph types: strict and coach
 - All API calls use fetchWithRetry for reliability
 - Countdown logic uses synchronous refs to prevent race conditions
+- Email templates use embedded Base64 SVG logos to prevent email client image blocking
+- Admin dashboard includes user management, session viewing, questions bank management, and candidate invitations
+- Authentication integrated with Auth0 for secure user management
+- Database uses Azure Cosmos DB for scalable session storage
+- LLM-powered question generation and evaluation using LangChain with streaming capabilities
 
 ## Future Enhancements
 

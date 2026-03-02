@@ -7,6 +7,12 @@ from uuid import uuid4
 # Pydantic Models for Request Bodies
 class DeleteMultipleQuestionsRequest(BaseModel):
     question_ids: List[str]
+
+class CreateQuestionRequest(BaseModel):
+    text: str
+    category: str
+    role: str
+    experience: Optional[str] = "Mid-Level"
 from langgraph.types import Command
 import base64
 import os
@@ -2306,6 +2312,58 @@ async def get_question_usage(question_id: str):
     except Exception as e:
         logger.error(f"Error fetching question usage: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch usage: {str(e)}")
+
+
+@app.post("/admin/add-question")
+async def add_question(request: CreateQuestionRequest):
+    """
+    Add a new interview question to the Cosmos DB.
+    
+    Parameters:
+    - text: The question text
+    - category: Category (Technical, Behavioral, Architecture, Management)
+    - role: Job role for the question
+    - experience: Experience level (Junior, Mid-Level, Senior)
+    """
+    try:
+        from backend.core.cosmos import questions_container
+        
+        # Create new question document
+        question_id = str(uuid4())
+        now = datetime.utcnow().isoformat()
+        
+        question_document = {
+            "id": question_id,
+            "text": request.text,
+            "category": request.category,
+            "role": request.role,
+            "experience": request.experience or "Mid-Level",
+            "created_at": now,
+            "updated_at": now,
+            "uses_count": 0,
+            "is_active": True
+        }
+        
+        # Insert into Cosmos DB
+        questions_container.create_item(body=question_document)
+        
+        logger.info(f"✅ Created new question {question_id}: {request.text[:50]}...")
+        
+        return {
+            "success": True,
+            "id": question_id,
+            "text": request.text,
+            "category": request.category,
+            "role": request.role,
+            "experience": request.experience,
+            "created_at": now
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error adding question: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to add question: {str(e)}")
 
 
 @app.delete("/admin/question/{question_id}")

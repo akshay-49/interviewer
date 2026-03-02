@@ -4,7 +4,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import Optional
 from backend.core.cosmos import users_container, serialize_for_cosmos
-from backend.auth.auth0_utils import verify_entra_id_token
+from backend.auth.auth0_utils import verify_entra_id_token, get_current_user_from_cookie, extract_user_info
 from datetime import datetime, timedelta
 from collections import defaultdict
 import logging
@@ -21,6 +21,21 @@ def _get_dev_user(request: Request) -> dict:
         }
     # In production, would need real auth
     raise HTTPException(status_code=401, detail="Authentication required")
+
+
+def _get_authenticated_user(request: Request) -> dict:
+    """Strict auth dependency: requires a valid token cookie/header in all environments."""
+    payload = get_current_user_from_cookie(request)
+    user_info = extract_user_info(payload)
+    email = (user_info.get("email") or "").lower()
+    user_id = user_info.get("auth0_sub") or payload.get("sub") or payload.get("oid")
+
+    return {
+        "user_id": user_id,
+        "email": email,
+        "full_name": user_info.get("full_name") or email,
+        "is_admin": email.endswith("@accellor.com")
+    }
 import uuid
 import requests
 import os
@@ -120,12 +135,12 @@ def logout(request: Request):
 
 
 @router.get("/me", response_model=UserResponse)
-def get_me(current_user: dict = Depends(_get_dev_user)):
-    """Return current user from session - Development mode only."""
+def get_me(current_user: dict = Depends(_get_authenticated_user)):
+    """Return current authenticated user from session token."""
     return {
         "id": current_user.get("user_id"),
         "email": current_user.get("email"),
-        "full_name": current_user.get("email"),
+        "full_name": current_user.get("full_name") or current_user.get("email"),
         "picture": None,
         "is_admin": current_user.get("is_admin", False),
         "is_active": True

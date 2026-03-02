@@ -12,6 +12,14 @@ export default function QuestionBankScreen() {
   const [stats, setStats] = useState(null);
   const [selectedQuestions, setSelectedQuestions] = useState(new Set());
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [isAddingQuestion, setIsAddingQuestion] = useState(false);
+  const [newQuestion, setNewQuestion] = useState({
+    text: '',
+    category: 'Technical',
+    role: '',
+    experience: 'Mid-Level'
+  });
 
   // Fetch questions on component mount
   useEffect(() => {
@@ -213,6 +221,71 @@ export default function QuestionBankScreen() {
     }
   };
 
+  const handleAddQuestion = async () => {
+    if (!newQuestion.text.trim()) {
+      alert('Please enter a question');
+      return;
+    }
+    if (!newQuestion.role.trim()) {
+      alert('Please enter a role');
+      return;
+    }
+
+    try {
+      setIsAddingQuestion(true);
+      const response = await fetch('http://localhost:8000/admin/add-question', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: newQuestion.text,
+          category: newQuestion.category,
+          role: newQuestion.role,
+          experience: newQuestion.experience
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to add question');
+      }
+
+      const data = await response.json();
+      
+      // Add new question to the list
+      const formattedQuestion = {
+        id: data.id,
+        text: data.text,
+        category: data.category,
+        categoryColor: getCategoryColor(data.category),
+        role: data.role,
+        experience: data.experience,
+        experienceColor: getExperienceColor(data.experience),
+        lastUpdated: new Date().toLocaleDateString('en-US', { 
+          year: 'numeric', 
+          month: 'short', 
+          day: 'numeric' 
+        }),
+        usesCount: 0
+      };
+      
+      setQuestions([formattedQuestion, ...questions]);
+      setShowAddModal(false);
+      setNewQuestion({
+        text: '',
+        category: 'Technical',
+        role: '',
+        experience: 'Mid-Level'
+      });
+      
+      fetchStats();
+      console.log('✅ Question added successfully');
+    } catch (err) {
+      console.error('❌ Error adding question:', err);
+      alert('Failed to add question: ' + err.message);
+    } finally {
+      setIsAddingQuestion(false);
+    }
+  };
+
   const filteredQuestions = questions.filter(q => {
     const matchesSearch = q.text.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesRole = selectedRole === 'All Roles' || q.role === selectedRole;
@@ -234,7 +307,9 @@ export default function QuestionBankScreen() {
               {stats ? `${stats.total_questions} questions` : 'Loading...'} • Manage and organize your interview question repository for AI evaluation.
             </p>
           </div>
-          <button className="flex min-w-[160px] cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-xl h-12 px-6 bg-primary text-white text-base font-bold leading-normal tracking-[0.015em] hover:shadow-lg transition-all shadow-primary/20">
+          <button 
+            onClick={() => setShowAddModal(true)}
+            className="flex min-w-[160px] cursor-pointer items-center justify-center gap-2 overflow-hidden rounded-xl h-12 px-6 bg-primary text-white text-base font-bold leading-normal tracking-[0.015em] hover:shadow-lg transition-all shadow-primary/20">
             <span className="material-symbols-outlined">add</span>
             <span className="truncate">Add New Question</span>
           </button>
@@ -427,10 +502,6 @@ export default function QuestionBankScreen() {
                       <td className="px-6 py-4 text-sm text-[#4c829a]">{question.lastUpdated}</td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex items-center gap-2 justify-end">
-                          <button className="text-primary hover:text-primary/80 font-bold text-sm flex items-center gap-1 transition-colors">
-                            <span className="material-symbols-outlined text-lg">visibility</span>
-                            Preview
-                          </button>
                           <button
                             onClick={() => handleDeleteSingle(question.id)}
                             disabled={isDeleting}
@@ -465,6 +536,81 @@ export default function QuestionBankScreen() {
                 </button>
                 <button className="px-3 py-1.5 border border-gray-200 dark:border-gray-800 rounded-lg text-sm font-medium bg-white dark:bg-background-dark hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
                   Next
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Add Question Modal */}
+        {showAddModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+            <div className="bg-white dark:bg-background-dark rounded-xl shadow-xl max-w-md w-full mx-4 p-6">
+              <h2 className="text-2xl font-bold text-[#0d171b] dark:text-white mb-4">Add New Question</h2>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-semibold text-[#0d171b] dark:text-white mb-2">Question Text</label>
+                  <textarea
+                    value={newQuestion.text}
+                    onChange={(e) => setNewQuestion({...newQuestion, text: e.target.value})}
+                    placeholder="Enter the interview question..."
+                    className="w-full px-4 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-[#0d171b] dark:text-white placeholder:text-[#4c829a] focus:outline-none focus:ring-2 focus:ring-primary resize-none h-24"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-[#0d171b] dark:text-white mb-2">Category</label>
+                  <select
+                    value={newQuestion.category}
+                    onChange={(e) => setNewQuestion({...newQuestion, category: e.target.value})}
+                    className="w-full px-4 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-[#0d171b] dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    <option>Technical</option>
+                    <option>Behavioral</option>
+                    <option>Architecture</option>
+                    <option>Management</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-[#0d171b] dark:text-white mb-2">Role</label>
+                  <input
+                    type="text"
+                    value={newQuestion.role}
+                    onChange={(e) => setNewQuestion({...newQuestion, role: e.target.value})}
+                    placeholder="e.g., Software Engineer, Product Manager"
+                    className="w-full px-4 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-[#0d171b] dark:text-white placeholder:text-[#4c829a] focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-[#0d171b] dark:text-white mb-2">Experience Level</label>
+                  <select
+                    value={newQuestion.experience}
+                    onChange={(e) => setNewQuestion({...newQuestion, experience: e.target.value})}
+                    className="w-full px-4 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-[#0d171b] dark:text-white focus:outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    <option>Junior</option>
+                    <option>Mid-Level</option>
+                    <option>Senior</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex gap-2 mt-6">
+                <button
+                  onClick={() => setShowAddModal(false)}
+                  className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-700 rounded-lg text-[#0d171b] dark:text-white font-semibold hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleAddQuestion}
+                  disabled={isAddingQuestion}
+                  className="flex-1 px-4 py-2 bg-primary text-white rounded-lg font-semibold hover:shadow-lg transition-all disabled:opacity-50 shadow-primary/20"
+                >
+                  {isAddingQuestion ? 'Adding...' : 'Add Question'}
                 </button>
               </div>
             </div>
